@@ -1,0 +1,68 @@
+{
+  "expo": {
+    "name": "FacePass",
+    "slug": "facepass",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "facepass",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "FacePass needs camera access for facial recognition check-in.",
+        "NSLocationWhenInUseUsageDescription": "FacePass needs your location to verify you are at your work site.",
+        "NSFaceIDUsageDescription": "FacePass uses Face ID for seamless and secure sign-in."
+      }
+    },
+    "android": {
+      "package": "com.facepass.attendance",
+      "adaptiveIcon": {
+        "backgroundColor": "#2563EB",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "predictiveBackGestureEnabled": false,
+      "usesCleartextTraffic": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "FacePass needs camera access for facial recognition."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "FacePass needs your location to verify you are at your work site."
+        }
+      ],
+      "expo-local-authentication",
+      "expo-notifications",
+      "expo-secure-store",
+      "expo-router",
+      "expo-status-bar"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "8a269c45-f058-4acb-91ca-4bd3df788002"
+      }
+    }
+  }
+}
