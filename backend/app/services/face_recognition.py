@@ -15,17 +15,21 @@ class FaceRecognitionService:
     """Service for face detection, embedding extraction, and matching."""
 
     def __init__(self):
-        """Initialize the face recognition model.
-
-        Loads InsightFace's buffalo_l model for ArcFace embeddings.
-        Falls back gracefully if the model is not available.
-        """
+        """Initialize the face recognition model lazily."""
         self.model = None
         self._initialized = False
+        self._loading = False
+
+    def load_model(self):
+        """Loads InsightFace's buffalo_l model for ArcFace embeddings in the background."""
+        if self._initialized or self._loading:
+            return
+        self._loading = True
         try:
             import insightface
             from insightface.app import FaceAnalysis
 
+            logger.info("Loading InsightFace model (buffalo_l)...")
             self.model = FaceAnalysis(
                 name="buffalo_l",
                 providers=["CPUExecutionProvider"],
@@ -37,9 +41,10 @@ class FaceRecognitionService:
         except Exception as e:
             logger.warning(
                 f"Could not load InsightFace model: {e}. "
-                "Face recognition will not be available until the model is installed. "
-                "Run: insightface-cli model.download buffalo_l"
+                "Face recognition will not be available until the model is installed."
             )
+        finally:
+            self._loading = False
 
     @property
     def is_available(self) -> bool:
@@ -72,6 +77,8 @@ class FaceRecognitionService:
         Returns:
             512-dimensional numpy array, or None if no face detected.
         """
+        if not self.is_available:
+            self.load_model()
         if not self.is_available:
             logger.error("Face recognition model not available")
             return None

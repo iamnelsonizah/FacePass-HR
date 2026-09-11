@@ -24,22 +24,17 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan handler.
 
-    Runs on startup and shutdown. Initializes the face recognition
-    model on startup so it's ready for the first request.
+    Starts FacePass backend immediately so health checks succeed instantly.
+    Loads InsightFace model in a background thread.
     """
-    # Startup
-    logger.info("Starting FacePass backend...")
-
-    # Initialize face recognition model (imported as singleton)
+    import threading
     from app.services.face_recognition import face_service
 
-    if face_service.is_available:
-        logger.info("Face recognition model loaded and ready")
-    else:
-        logger.warning(
-            "Face recognition model NOT available. "
-            "Enrollment and check-in will not work until the model is installed."
-        )
+    logger.info("Starting FacePass backend...")
+
+    # Load model in a background daemon thread so HTTP server binds instantly
+    thread = threading.Thread(target=face_service.load_model, daemon=True)
+    thread.start()
 
     yield
 
