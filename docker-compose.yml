@@ -1,0 +1,42 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: facepass-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    volumes:
+      - insightface_models:/root/.insightface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile_inline: |
+        FROM node:20-alpine
+        WORKDIR /app
+        COPY package*.json ./
+        RUN npm install
+        COPY . .
+        RUN npm run build -- --webpack
+        EXPOSE 3001
+        CMD ["npm", "run", "start", "--", "-p", "3001"]
+    container_name: facepass-admin
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - ./admin/.env.local
+    depends_on:
+      - backend
+
+volumes:
+  insightface_models:
