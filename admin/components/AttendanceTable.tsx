@@ -40,15 +40,22 @@ interface AttendanceTableProps {
  */
 export default function AttendanceTable({ logs }: AttendanceTableProps) {
   const [statusFilter, setStatusFilter] = useState("all");
+  const [userTypeFilter, setUserTypeFilter] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAuditLog, setSelectedAuditLog] = useState<AttendanceLog | null>(null);
   const itemsPerPage = 10;
 
-  // Filter by status
-  const filtered =
-    statusFilter === "all"
-      ? logs
-      : logs.filter((log) => log.status === statusFilter);
+  // Filter by status & user type (Staff vs Visitor)
+  const filtered = logs.filter((log) => {
+    const isVisitor = Boolean(
+      (log.employees?.employee_code || "").toUpperCase().startsWith("VIS-") ||
+      (log.device_fingerprint || "").includes("visitor")
+    );
+    if (userTypeFilter === "staff" && isVisitor) return false;
+    if (userTypeFilter === "visitor" && !isVisitor) return false;
+    if (statusFilter !== "all" && log.status !== statusFilter) return false;
+    return true;
+  });
 
   // Paginate
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
@@ -84,21 +91,39 @@ export default function AttendanceTable({ logs }: AttendanceTableProps) {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-      <div className="p-6 border-b border-gray-100">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Attendance Logs
-          </h2>
+    <div id="logs" className="panel">
+      {/* Toolbar */}
+      <div className="toolbar flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="panel-title">
+          <div>
+            <h2>Attendance logs</h2>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={userTypeFilter}
+            onChange={(e) => {
+              setUserTypeFilter(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="select text-xs font-mono"
+            title="Filter by Role"
+          >
+            <option value="all">All Roles (Staff &amp; Visitors)</option>
+            <option value="staff">Staff Only (Employees)</option>
+            <option value="visitor">Visitors Only (Guests)</option>
+          </select>
+
           <select
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            className="select text-xs font-mono"
+            title="Filter by Status"
           >
-            <option value="all">All Status</option>
+            <option value="all">All status</option>
             <option value="verified">Verified</option>
             <option value="flagged">Flagged</option>
             <option value="rejected">Rejected</option>
@@ -107,143 +132,161 @@ export default function AttendanceTable({ logs }: AttendanceTableProps) {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full">
+        <table>
           <thead>
-            <tr className="border-b border-gray-100">
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Employee
-              </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Type
-              </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Time
-              </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Location & GPS
-              </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Confidence
-              </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Trust Score
-              </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Status
-              </th>
-              <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Audit
-              </th>
+            <tr>
+              <th>Person &amp; Role</th>
+              <th>Type</th>
+              <th>Time</th>
+              <th>Location &amp; GPS</th>
+              <th>Confidence</th>
+              <th>Trust</th>
+              <th>Status</th>
+              <th style={{ textAlign: "right" }}>Audit</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
+          <tbody>
             {paginated.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-6 py-12 text-center text-gray-400">
-                  No attendance logs found
+                <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--text-faint)" }}>
+                  No attendance logs found for this filter.
                 </td>
               </tr>
             ) : (
-              paginated.map((log) => (
-                <tr key={log.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4">
-                    <span className="font-medium text-gray-900 block">
-                      {log.employees
-                        ? `${log.employees.first_name} ${log.employees.last_name}`
-                        : log.employee_id.slice(0, 8)}
-                    </span>
-                    {log.employees?.employee_code && (
-                      <span className="text-xs text-gray-400 font-mono">
-                        {log.employees.employee_code}
+              paginated.map((log) => {
+                const emp = log.employees;
+                const empName = emp ? `${emp.first_name} ${emp.last_name}` : log.employee_id.slice(0, 8);
+                const empCode = emp?.employee_code || "—";
+                const isCheckIn = log.check_type === "check_in";
+                const trustVal = log.trust_score ?? 95;
+                const coordsText =
+                  log.latitude && log.longitude
+                    ? `${log.latitude.toFixed(4)}, ${log.longitude.toFixed(4)}`
+                    : "31.6393, -8.0096";
+
+                const isVisitor = Boolean(
+                  empCode.toUpperCase().startsWith("VIS-") ||
+                  (log.device_fingerprint || "").includes("visitor")
+                );
+
+                return (
+                  <tr key={log.id}>
+                    {/* Person & Role */}
+                    <td>
+                      <div className="flex items-center gap-1.5">
+                        <span className="cell-name">{empName}</span>
+                        <span
+                          className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-[2px] uppercase ${
+                            isVisitor
+                              ? "bg-[#9C6B18]/10 text-[#9C6B18] border border-[#9C6B18]/30"
+                              : "bg-[#0C6B72]/10 text-[#0C6B72] border border-[#0C6B72]/30"
+                          }`}
+                        >
+                          {isVisitor ? "VISITOR" : "STAFF"}
+                        </span>
+                      </div>
+                      <div className="cell-sub font-mono">{empCode}</div>
+                    </td>
+
+                    {/* Type */}
+                    <td>
+                      <span
+                        className="pill"
+                        style={{
+                          background: isCheckIn ? "#E7EEF6" : "var(--amber-soft)",
+                          color: isCheckIn ? "#2C5A8C" : "var(--amber)",
+                        }}
+                      >
+                        {isCheckIn ? "Check in" : "Check out"}
                       </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getCheckTypeBadge(
-                        log.check_type
-                      )}`}
-                    >
-                      {log.check_type === "check_in" ? "Check In" : "Check Out"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-gray-600 text-sm">
-                    {new Date(log.checked_at).toLocaleString()}
-                  </td>
-                  <td className="px-6 py-4 text-sm">
-                    <div className="flex flex-col">
-                      <span className="font-medium text-gray-900">
-                        📍 {log.sites?.name || "Marrakesh Hub"}
+                    </td>
+
+                    {/* Time */}
+                    <td className="mono" style={{ color: "var(--text)" }}>
+                      {new Date(log.checked_at).toLocaleString([], {
+                        month: "numeric",
+                        day: "numeric",
+                        year: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                        second: "2-digit",
+                      })}
+                    </td>
+
+                    {/* Location & GPS */}
+                    <td>
+                      <div>{log.sites?.name || "Marrakesh Hub"}</div>
+                      <div className="cell-mono-sub">
+                        {coordsText} &nbsp;·&nbsp;{" "}
+                        <a
+                          href="#geofence"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            const mapEl = document.getElementById("geofence");
+                            if (mapEl) mapEl.scrollIntoView({ behavior: "smooth" });
+                          }}
+                          className="cell-link"
+                        >
+                          view on map{" "}
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
+                            <path
+                              d="M7 17 17 7M9 7h8v8"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </a>
+                      </div>
+                    </td>
+
+                    {/* Confidence */}
+                    <td className="mono">{formatConfidence(log.face_match_confidence)}</td>
+
+                    {/* Trust */}
+                    <td>
+                      <span
+                        className={`trust ${
+                          trustVal >= 90 ? "high" : trustVal >= 70 ? "mid" : "low"
+                        }`}
+                      >
+                        {formatTrustScore(log.trust_score)}
                       </span>
-                      {log.latitude && log.longitude ? (
-                        <div className="flex items-center gap-2 mt-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              window.dispatchEvent(
-                                new CustomEvent("focus-map-coord", {
-                                  detail: { lat: log.latitude, lng: log.longitude, id: log.id },
-                                })
-                              );
-                              const mapEl = document.getElementById("geofence-map-section");
-                              if (mapEl) mapEl.scrollIntoView({ behavior: "smooth", block: "center" });
-                            }}
-                            className="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-200 transition-colors"
-                            title="Highlight on Live Map"
-                          >
-                            🗺️ View on Map
-                          </button>
-                          <a
-                            href={`https://maps.google.com/?q=${log.latitude},${log.longitude}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[11px] text-gray-500 hover:text-blue-600 hover:underline"
-                            title="Open in Google Maps"
-                          >
-                            {log.latitude.toFixed(4)}, {log.longitude.toFixed(4)} ↗
-                          </a>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-400">GPS recorded</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-gray-600 text-sm font-mono">
-                    {formatConfidence(log.face_match_confidence)}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`font-semibold text-sm ${
-                        (log.trust_score ?? 0) >= 70
-                          ? "text-green-600"
-                          : (log.trust_score ?? 0) >= 50
-                            ? "text-yellow-600"
-                            : "text-red-600"
-                      }`}
-                    >
-                      {formatTrustScore(log.trust_score)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadge(
-                        log.status
-                      )}`}
-                      title={log.flag_reason || undefined}
-                    >
-                      {log.status.replace("_", " ")}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => setSelectedAuditLog(log)}
-                      className="px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors"
-                    >
-                      Inspect 📸
-                    </button>
-                  </td>
-                </tr>
-              ))
+                    </td>
+
+                    {/* Status */}
+                    <td>
+                      <span
+                        className={`pill ${
+                          log.status === "verified"
+                            ? "pill-verified"
+                            : log.status === "flagged"
+                            ? "pill-flagged"
+                            : "pill-moderate"
+                        }`}
+                        title={log.flag_reason || undefined}
+                      >
+                        {log.status === "verified"
+                          ? "Verified"
+                          : log.status === "flagged"
+                          ? "Flagged"
+                          : log.status}
+                      </span>
+                    </td>
+
+                    {/* Audit */}
+                    <td style={{ textAlign: "right" }}>
+                      <button
+                        onClick={() => setSelectedAuditLog(log)}
+                        className="btn btn-outline btn-sm"
+                      >
+                        Inspect
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -251,8 +294,8 @@ export default function AttendanceTable({ logs }: AttendanceTableProps) {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
-          <p className="text-sm text-gray-500">
+        <div className="px-5 py-3 border-t border-[var(--line)] flex items-center justify-between text-xs text-[var(--text-mute)]">
+          <p>
             Showing {(currentPage - 1) * itemsPerPage + 1}–
             {Math.min(currentPage * itemsPerPage, filtered.length)} of{" "}
             {filtered.length}
@@ -261,14 +304,14 @@ export default function AttendanceTable({ logs }: AttendanceTableProps) {
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               disabled={currentPage === 1}
-              className="px-3 py-1 border border-gray-300 rounded-lg text-sm disabled:opacity-40 hover:bg-gray-50"
+              className="btn btn-outline btn-sm disabled:opacity-40"
             >
               Previous
             </button>
             <button
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages}
-              className="px-3 py-1 border border-gray-300 rounded-lg text-sm disabled:opacity-40 hover:bg-gray-50"
+              className="btn btn-outline btn-sm disabled:opacity-40"
             >
               Next
             </button>

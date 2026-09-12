@@ -36,17 +36,18 @@ interface AuditDisputeModalProps {
   record: DisputeRecord | null;
   allLogs?: DisputeRecord[];
   onClose: () => void;
+  onResolved?: (id: string) => void;
 }
 
 export default function AuditDisputeModal({
   record,
   allLogs = [],
   onClose,
+  onResolved,
 }: AuditDisputeModalProps) {
   const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    // Reset image error state whenever modal opens for a new record
     setImgErrors({});
   }, [record?.id]);
 
@@ -60,7 +61,6 @@ export default function AuditDisputeModal({
     avatar_url: undefined,
   };
 
-  // Helper to check same day
   const isSameDay = (d1: string, d2: string) => {
     try {
       return new Date(d1).toDateString() === new Date(d2).toDateString();
@@ -82,7 +82,6 @@ export default function AuditDisputeModal({
   if (record.check_type === "check_in") {
     checkInLog = record;
   } else {
-    // Current is check_out, find matched check-in
     checkInLog =
       allLogs.find(
         (l) =>
@@ -104,7 +103,6 @@ export default function AuditDisputeModal({
   if (record.check_type === "check_out") {
     checkOutLog = record;
   } else {
-    // Current is check_in, find matching checkout if exists
     checkOutLog =
       allLogs.find(
         (l) =>
@@ -121,7 +119,6 @@ export default function AuditDisputeModal({
       ? `https://cspzyayvqyswybqvmdmw.supabase.co/storage/v1/object/public/attendance-snapshots/snapshots/${checkOutLog.id}.jpg`
       : null);
 
-  // Resemblance calculations
   const checkInResemblance =
     checkInLog?.face_match_confidence != null
       ? (checkInLog.face_match_confidence * 100).toFixed(1)
@@ -143,76 +140,89 @@ export default function AuditDisputeModal({
     (record.flag_reason &&
       record.flag_reason.toLowerCase().includes("buddy"));
 
-  const isVerified = record.status === "verified";
   const trustScore = record.trust_score ?? 95;
   const trustColor =
     trustScore >= 80
-      ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+      ? "text-[#0C6B72]"
       : trustScore >= 50
-        ? "text-amber-700 bg-amber-50 border-amber-200"
-        : "text-rose-700 bg-rose-50 border-rose-200";
+        ? "text-[#9C6B18]"
+        : "text-[#AE3B26]";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto animate-fade-in">
-      <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-4xl overflow-hidden my-auto max-h-[95vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 overflow-y-auto">
+      <div className="bg-white border border-[var(--line,#E4E2DC)] rounded-[4px] shadow-2xl w-full max-w-4xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/80 sticky top-0 z-10">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-xl shadow-sm">
-              📸
+        <div className="px-5 py-3 border-b border-[var(--line,#E4E2DC)] flex items-center justify-between bg-[var(--paper,#F6F5F1)] sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-[3px] bg-white border border-[var(--line,#E4E2DC)] flex items-center justify-center text-[var(--ink,#14171C)]">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                <circle cx="12" cy="13" r="4"/>
+              </svg>
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-bold text-gray-900 text-lg">
+                <h3 className="font-semibold text-sm text-[var(--ink,#14171C)]">
                   3-Way Biometric Triangulation Audit
                 </h3>
-                <span className="text-[11px] font-semibold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-200 uppercase tracking-wide">
-                  AI Resemblance Engine
+                <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded-[2px] bg-[#0C6B72]/10 text-[#0C6B72] border border-[#0C6B72]/30 uppercase tracking-wider">
+                  ArcFace 512D
                 </span>
               </div>
-              <p className="text-xs text-gray-500">
-                Log ID: <span className="font-mono">{record.id}</span>
+              <p className="text-[11px] text-[var(--muted,#6E7175)] font-mono">
+                Log ref: {record.id}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-200/60 transition-colors"
+            className="text-[var(--muted,#6E7175)] hover:text-[var(--ink,#14171C)] p-1 rounded transition-colors"
+            title="Close"
           >
-            ✕
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
           </button>
         </div>
 
         {/* Scrollable Body Content */}
-        <div className="p-6 space-y-6 overflow-y-auto">
+        <div className="p-5 space-y-5 overflow-y-auto">
           {/* Anomaly / Trust Banner */}
           {isBuddyPunchAnomaly ? (
-            <div className="bg-rose-50 border-2 border-rose-300 rounded-xl p-4 flex items-start gap-3">
-              <span className="text-2xl">⚠️</span>
+            <div className="bg-[#AE3B26]/10 border border-[#AE3B26]/30 rounded-[3px] p-3.5 flex items-start gap-3">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#AE3B26" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
               <div>
-                <h4 className="text-sm font-bold text-rose-900 uppercase tracking-wide">
-                  Buddy Punching / Impersonation Anomaly Detected
+                <h4 className="text-xs font-semibold text-[#AE3B26] uppercase tracking-wider">
+                  Biometric Discontinuity / Impersonation Anomaly Detected
                 </h4>
-                <p className="text-xs text-rose-700 mt-1 leading-relaxed">
+                <p className="text-xs text-[var(--ink,#14171C)] mt-1 leading-relaxed">
                   {record.flag_reason ||
                     "Discontinuity detected: The facial embedding captured during this session does not match the morning check-in biometric signature. Session resemblance is below the 65% identity continuity threshold."}
                 </p>
               </div>
             </div>
           ) : (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex items-center justify-between">
+            <div className="bg-[#0C6B72]/10 border border-[#0C6B72]/30 rounded-[3px] p-3 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <span className="text-xl">🛡️</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0C6B72" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  <path d="m9 12 2 2 4-4"/>
+                </svg>
                 <div>
-                  <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-wide">
+                  <h4 className="text-xs font-semibold text-[#0C6B72] uppercase tracking-wider">
                     Identity & Continuity Verified
                   </h4>
-                  <p className="text-xs text-emerald-700">
-                    Live biometric capture matches master enrolled facial vector with continuous session integrity.
+                  <p className="text-[11px] text-[var(--muted,#6E7175)]">
+                    Live capture matches enrolled biometric embedding with continuous session integrity.
                   </p>
                 </div>
               </div>
-              <span className="text-xs font-bold bg-emerald-600 text-white px-2.5 py-1 rounded-full uppercase tracking-wider">
+              <span className="text-[10px] font-mono font-semibold bg-[#0C6B72] text-white px-2 py-0.5 rounded-[2px] uppercase tracking-wider">
                 100% Genuine
               </span>
             </div>
@@ -220,28 +230,32 @@ export default function AuditDisputeModal({
 
           {/* 3-Way Triangulation Grid */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500">
-                Visual Triangulation: Enrolled Profile ➔ Check-In ➔ Check-Out
+            <div className="flex items-center justify-between mb-2.5">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted,#6E7175)]">
+                Visual Triangulation: Enrolled Profile → Check-In → Check-Out
               </h4>
-              <span className="text-xs text-gray-400">
-                512D ArcFace Cosine Resemblance
+              <span className="text-[11px] text-[var(--muted,#6E7175)] font-mono">
+                Cosine Similarity Threshold: 0.60
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {/* CARD 1: Enrolled Master Profile */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col relative shadow-sm">
+              <div className="bg-white border border-[var(--line,#E4E2DC)] rounded-[3px] p-3 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1">
-                    👤 Master Enrolled
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted,#6E7175)] flex items-center gap-1">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                      <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                    Master Enrolled
                   </span>
-                  <span className="text-[10px] bg-slate-200 text-slate-800 font-semibold px-2 py-0.5 rounded">
-                    Ground Truth
+                  <span className="text-[9px] font-mono bg-[var(--paper,#F6F5F1)] text-[var(--muted,#6E7175)] px-1.5 py-0.5 rounded border border-[var(--line,#E4E2DC)] uppercase">
+                    Baseline
                   </span>
                 </div>
 
-                <div className="w-full aspect-square rounded-lg overflow-hidden bg-slate-900 border border-slate-300 flex items-center justify-center relative shadow-inner">
+                <div className="w-full aspect-square rounded-[2px] overflow-hidden bg-[var(--paper,#F6F5F1)] border border-[var(--line,#E4E2DC)] flex items-center justify-center relative">
                   {enrolledUrl && !imgErrors["master"] ? (
                     <img
                       src={enrolledUrl}
@@ -252,41 +266,45 @@ export default function AuditDisputeModal({
                       }
                     />
                   ) : (
-                    <div className="text-center p-4 text-slate-400">
-                      <span className="text-4xl block mb-1">👤</span>
-                      <p className="text-xs font-medium">Master Enrolled</p>
-                      <p className="text-[10px] text-slate-500">
-                        {emp.first_name} {emp.last_name}
-                      </p>
+                    <div className="text-center p-3 text-[var(--muted,#6E7175)]">
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" className="mx-auto mb-1 opacity-50">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                        <circle cx="12" cy="7" r="4"/>
+                      </svg>
+                      <p className="text-[11px] font-medium">Master Enrolled</p>
                     </div>
                   )}
-                  <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-sm text-white text-[10px] px-2 py-0.5 rounded">
-                    Master Baseline
+                  <div className="absolute bottom-1.5 left-1.5 bg-[var(--ink,#14171C)]/80 text-white font-mono text-[9px] px-1.5 py-0.5 rounded-[2px]">
+                    Registered
                   </div>
                 </div>
 
                 <div className="mt-2 text-center">
-                  <p className="text-xs font-bold text-gray-900">
+                  <p className="text-xs font-semibold text-[var(--ink,#14171C)]">
                     {emp.first_name} {emp.last_name}
                   </p>
-                  <p className="text-[11px] text-gray-500 font-mono">
+                  <p className="text-[10px] text-[var(--muted,#6E7175)] font-mono">
                     {emp.employee_code || "FP-ID"}
                   </p>
                 </div>
               </div>
 
               {/* CARD 2: Morning Check-In Snapshot */}
-              <div className="bg-emerald-50/50 border border-emerald-200 rounded-xl p-3.5 flex flex-col relative shadow-sm">
+              <div className="bg-white border border-[var(--line,#E4E2DC)] rounded-[3px] p-3 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1">
-                    🌅 Check-In Face
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted,#6E7175)] flex items-center gap-1">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="4"/>
+                      <path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+                    </svg>
+                    Check-In Punch
                   </span>
-                  <span className="text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-2 py-0.5 rounded">
+                  <span className="text-[9px] font-mono bg-[var(--paper,#F6F5F1)] text-[var(--muted,#6E7175)] px-1.5 py-0.5 rounded border border-[var(--line,#E4E2DC)] uppercase">
                     {checkInLog ? "Captured" : "Pending"}
                   </span>
                 </div>
 
-                <div className="w-full aspect-square rounded-lg overflow-hidden bg-slate-900 border border-emerald-300 flex items-center justify-center relative shadow-inner">
+                <div className="w-full aspect-square rounded-[2px] overflow-hidden bg-[var(--paper,#F6F5F1)] border border-[var(--line,#E4E2DC)] flex items-center justify-center relative">
                   {checkInUrl && !imgErrors["checkin"] ? (
                     <img
                       src={checkInUrl}
@@ -297,48 +315,53 @@ export default function AuditDisputeModal({
                       }
                     />
                   ) : (
-                    <div className="text-center p-4 text-slate-400">
-                      <span className="text-4xl block mb-1">📸</span>
-                      <p className="text-xs font-medium">
+                    <div className="text-center p-3 text-[var(--muted,#6E7175)]">
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" className="mx-auto mb-1 opacity-50">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                        <circle cx="12" cy="13" r="4"/>
+                      </svg>
+                      <p className="text-[11px] font-medium">
                         {checkInLog ? "Snapshot Archived" : "Awaiting Punch"}
                       </p>
-                      <p className="text-[10px] text-slate-500">Morning Shift</p>
                     </div>
                   )}
-                  <div className="absolute bottom-2 left-2 bg-emerald-900/80 backdrop-blur-sm text-emerald-200 text-[10px] px-2 py-0.5 rounded font-semibold">
-                    Resemblance: {checkInResemblance}%
+                  <div className="absolute bottom-1.5 left-1.5 bg-[#0C6B72] text-white font-mono text-[9px] px-1.5 py-0.5 rounded-[2px] font-semibold">
+                    Match: {checkInResemblance}%
                   </div>
                 </div>
 
                 <div className="mt-2 text-center">
-                  <p className="text-xs font-bold text-emerald-900">
+                  <p className="text-xs font-semibold font-mono text-[var(--ink,#14171C)]">
                     {checkInLog
                       ? new Date(checkInLog.checked_at).toLocaleTimeString([], {
                           hour: "2-digit",
                           minute: "2-digit",
                         })
-                      : "No Morning Log"}
+                      : "—"}
                   </p>
-                  <p className="text-[11px] text-emerald-700">
+                  <p className="text-[10px] text-[var(--muted,#6E7175)] font-mono">
                     {checkInLog?.geofence_distance_meters != null
-                      ? `📍 ${Math.round(checkInLog.geofence_distance_meters)}m from site`
+                      ? `${Math.round(checkInLog.geofence_distance_meters)}m from center`
                       : "On-site verified"}
                   </p>
                 </div>
               </div>
 
               {/* CARD 3: Evening Check-Out Snapshot */}
-              <div className="bg-blue-50/50 border border-blue-200 rounded-xl p-3.5 flex flex-col relative shadow-sm">
+              <div className="bg-white border border-[var(--line,#E4E2DC)] rounded-[3px] p-3 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-blue-800 flex items-center gap-1">
-                    🌇 Check-Out Face
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted,#6E7175)] flex items-center gap-1">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+                    </svg>
+                    Check-Out Punch
                   </span>
-                  <span className="text-[10px] bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded">
+                  <span className="text-[9px] font-mono bg-[var(--paper,#F6F5F1)] text-[var(--muted,#6E7175)] px-1.5 py-0.5 rounded border border-[var(--line,#E4E2DC)] uppercase">
                     {checkOutLog ? "Captured" : "In Progress"}
                   </span>
                 </div>
 
-                <div className="w-full aspect-square rounded-lg overflow-hidden bg-slate-900 border border-blue-300 flex items-center justify-center relative shadow-inner">
+                <div className="w-full aspect-square rounded-[2px] overflow-hidden bg-[var(--paper,#F6F5F1)] border border-[var(--line,#E4E2DC)] flex items-center justify-center relative">
                   {checkOutUrl && !imgErrors["checkout"] ? (
                     <img
                       src={checkOutUrl}
@@ -349,33 +372,35 @@ export default function AuditDisputeModal({
                       }
                     />
                   ) : (
-                    <div className="text-center p-4 text-slate-400">
-                      <span className="text-4xl block mb-1">📸</span>
-                      <p className="text-xs font-medium">
-                        {checkOutLog ? "Snapshot Archived" : "Awaiting Check-Out"}
+                    <div className="text-center p-3 text-[var(--muted,#6E7175)]">
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" className="mx-auto mb-1 opacity-50">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                        <circle cx="12" cy="13" r="4"/>
+                      </svg>
+                      <p className="text-[11px] font-medium">
+                        {checkOutLog ? "Snapshot Archived" : "Awaiting Punch-Out"}
                       </p>
-                      <p className="text-[10px] text-slate-500">Evening Shift</p>
                     </div>
                   )}
                   {sessionContinuityResemblance && (
-                    <div className="absolute bottom-2 left-2 bg-blue-900/80 backdrop-blur-sm text-blue-200 text-[10px] px-2 py-0.5 rounded font-semibold">
+                    <div className="absolute bottom-1.5 left-1.5 bg-[var(--ink,#14171C)] text-white font-mono text-[9px] px-1.5 py-0.5 rounded-[2px] font-semibold">
                       Continuity: {sessionContinuityResemblance}%
                     </div>
                   )}
                 </div>
 
                 <div className="mt-2 text-center">
-                  <p className="text-xs font-bold text-blue-900">
+                  <p className="text-xs font-semibold font-mono text-[var(--ink,#14171C)]">
                     {checkOutLog
                       ? new Date(checkOutLog.checked_at).toLocaleTimeString([], {
                           hour: "2-digit",
                           minute: "2-digit",
                         })
-                      : "Pending Punch-Out"}
+                      : "Pending"}
                   </p>
-                  <p className="text-[11px] text-blue-700">
+                  <p className="text-[10px] text-[var(--muted,#6E7175)] font-mono">
                     {checkOutLog?.geofence_distance_meters != null
-                      ? `📍 ${Math.round(checkOutLog.geofence_distance_meters)}m from site`
+                      ? `${Math.round(checkOutLog.geofence_distance_meters)}m from center`
                       : "On-site verified"}
                   </p>
                 </div>
@@ -384,103 +409,107 @@ export default function AuditDisputeModal({
           </div>
 
           {/* AI Metrics & Identity Intelligence Row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {/* Identity Match Score */}
-            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+            <div className="bg-white p-3 rounded-[3px] border border-[var(--line,#E4E2DC)]">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Master Match
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted,#6E7175)]">
+                  Master ArcFace Match
                 </span>
-                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
-                  Identity
+                <span className="text-[10px] font-mono font-medium text-[#0C6B72]">
+                  IDENTITY
                 </span>
               </div>
-              <p className="text-2xl font-black text-gray-900 mt-2">
+              <p className="text-xl font-semibold font-mono text-[var(--ink,#14171C)] mt-1.5">
                 {checkInResemblance}%
               </p>
-              <p className="text-[11px] text-gray-500 mt-1">
-                Cosine similarity with master registered facial embedding
+              <p className="text-[10px] text-[var(--muted,#6E7175)] mt-0.5">
+                Cosine similarity against master registered facial embedding
               </p>
             </div>
 
             {/* Session Continuity Score */}
-            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+            <div className="bg-white p-3 rounded-[3px] border border-[var(--line,#E4E2DC)]">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted,#6E7175)]">
                   Session Continuity
                 </span>
-                <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
-                  Dual-Check
+                <span className="text-[10px] font-mono font-medium text-[var(--ink,#14171C)]">
+                  DUAL-PUNCH
                 </span>
               </div>
-              <p className="text-2xl font-black text-gray-900 mt-2">
+              <p className="text-xl font-semibold font-mono text-[var(--ink,#14171C)] mt-1.5">
                 {sessionContinuityResemblance ? `${sessionContinuityResemblance}%` : "100.0%"}
               </p>
-              <p className="text-[11px] text-gray-500 mt-1">
-                Cosine comparison between morning check-in & evening punch
+              <p className="text-[10px] text-[var(--muted,#6E7175)] mt-0.5">
+                Cosine comparison between morning check-in & checkout
               </p>
             </div>
 
             {/* Trust & Fraud Scoring */}
-            <div className={`p-4 rounded-xl border ${trustColor}`}>
+            <div className="bg-white p-3 rounded-[3px] border border-[var(--line,#E4E2DC)]">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted,#6E7175)]">
                   System Trust Score
                 </span>
-                <span className="text-xs font-bold uppercase tracking-wider">
+                <span className={`text-[10px] font-mono font-semibold uppercase ${trustColor}`}>
                   {record.status}
                 </span>
               </div>
-              <p className="text-2xl font-black mt-2">
+              <p className={`text-xl font-semibold font-mono mt-1.5 ${trustColor}`}>
                 {trustScore.toFixed(0)}%
               </p>
-              <p className="text-[11px] mt-1 opacity-80">
-                Composite of Face + Liveness + GPS Geofence + Device Hash
+              <p className="text-[10px] text-[var(--muted,#6E7175)] mt-0.5">
+                Composite of Face + Liveness + GPS Geofence + Hardware
               </p>
             </div>
           </div>
 
           {/* Location, GPS, & Hardware Fingerprint */}
-          <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
-              <span>📍</span> Verified Geofence & Location Intelligence
+          <div className="bg-[var(--paper,#F6F5F1)] p-3.5 rounded-[3px] border border-[var(--line,#E4E2DC)] space-y-2.5">
+            <h4 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted,#6E7175)] flex items-center gap-1.5">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                <circle cx="12" cy="10" r="3"/>
+              </svg>
+              <span>Verified Geofence & Proximity Telemetry</span>
             </h4>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="space-y-2">
-                <div className="flex justify-between py-1 border-b border-gray-200">
-                  <span className="text-gray-500">Site Facility:</span>
-                  <span className="font-semibold text-gray-900">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="space-y-1.5">
+                <div className="flex justify-between py-0.5 border-b border-[var(--line,#E4E2DC)]">
+                  <span className="text-[var(--muted,#6E7175)]">Site Facility</span>
+                  <span className="font-medium text-[var(--ink,#14171C)]">
                     {record.sites?.name || "Marrakesh Hub"}
                   </span>
                 </div>
-                <div className="flex justify-between py-1 border-b border-gray-200">
-                  <span className="text-gray-500">Facility Address:</span>
-                  <span className="font-semibold text-gray-900">
+                <div className="flex justify-between py-0.5 border-b border-[var(--line,#E4E2DC)]">
+                  <span className="text-[var(--muted,#6E7175)]">Facility Address</span>
+                  <span className="font-medium text-[var(--ink,#14171C)]">
                     {record.sites?.address || "3d Rue Ibn Sina, Gueliz, Marrakesh"}
                   </span>
                 </div>
-                <div className="flex justify-between py-1 border-b border-gray-200">
-                  <span className="text-gray-500">Geofence Proximity:</span>
-                  <span className="font-semibold text-emerald-700">
+                <div className="flex justify-between py-0.5 border-b border-[var(--line,#E4E2DC)]">
+                  <span className="text-[var(--muted,#6E7175)]">Geofence Proximity</span>
+                  <span className="font-mono text-[#0C6B72] font-medium">
                     {record.geofence_distance_meters != null
-                      ? `${Math.round(record.geofence_distance_meters)} meters from facility center`
-                      : "Within geofence perimeter (15m radius)"}
+                      ? `${Math.round(record.geofence_distance_meters)}m from facility center`
+                      : "Within geofence perimeter (2000m radius)"}
                   </span>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex justify-between items-center py-1 border-b border-gray-200">
-                  <span className="text-gray-500">GPS Coordinates:</span>
-                  <span className="font-semibold font-mono text-gray-900">
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center py-0.5 border-b border-[var(--line,#E4E2DC)]">
+                  <span className="text-[var(--muted,#6E7175)]">GPS Coordinates</span>
+                  <span className="font-mono text-[var(--ink,#14171C)]">
                     {record.latitude && record.longitude ? (
                       <a
                         href={`https://maps.google.com/?q=${record.latitude},${record.longitude}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 font-sans"
-                        title="View exact punch location on Google Maps"
+                        className="text-[#0C6B72] hover:underline"
+                        title="View punch location on external map"
                       >
                         {record.latitude.toFixed(5)}, {record.longitude.toFixed(5)} ↗
                       </a>
@@ -489,8 +518,8 @@ export default function AuditDisputeModal({
                     )}
                   </span>
                 </div>
-                <div className="flex justify-between items-center py-1 border-b border-gray-200">
-                  <span className="text-gray-500">Map Inspection:</span>
+                <div className="flex justify-between items-center py-0.5 border-b border-[var(--line,#E4E2DC)]">
+                  <span className="text-[var(--muted,#6E7175)]">Map Inspection</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -509,15 +538,20 @@ export default function AuditDisputeModal({
                         if (mapEl) mapEl.scrollIntoView({ behavior: "smooth", block: "center" });
                       }
                     }}
-                    className="text-blue-600 font-semibold hover:underline cursor-pointer"
+                    className="text-[#0C6B72] font-medium hover:underline cursor-pointer flex items-center gap-1"
                   >
-                    Highlight on Dashboard Live Map 🗺️
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
+                      <line x1="8" y1="2" x2="8" y2="18"/>
+                      <line x1="16" y1="6" x2="16" y2="22"/>
+                    </svg>
+                    <span>Highlight on Radar Map</span>
                   </button>
                 </div>
                 {record.device_fingerprint && (
-                  <div className="flex justify-between py-1 border-b border-gray-200">
-                    <span className="text-gray-500">Device Fingerprint:</span>
-                    <span className="font-mono text-[11px] text-gray-700">
+                  <div className="flex justify-between py-0.5 border-b border-[var(--line,#E4E2DC)]">
+                    <span className="text-[var(--muted,#6E7175)]">Hardware Hash</span>
+                    <span className="font-mono text-[10px] text-[var(--ink,#14171C)]">
                       {record.device_fingerprint.slice(0, 16)}...
                     </span>
                   </div>
@@ -528,20 +562,28 @@ export default function AuditDisputeModal({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between sticky bottom-0 z-10">
-          <div className="text-xs text-gray-500">
-            Authenticated Employee:{" "}
-            <span className="font-semibold text-gray-900">
-              {emp.first_name} {emp.last_name}
-            </span>{" "}
-            ({emp.email})
+        <div className="px-5 py-3 bg-[var(--paper,#F6F5F1)] border-t border-[var(--line,#E4E2DC)] flex items-center justify-between sticky bottom-0 z-10">
+          <div className="text-xs text-[var(--muted,#6E7175)]">
+            Employee: <span className="font-semibold text-[var(--ink,#14171C)]">{emp.first_name} {emp.last_name}</span>{" "}
+            <span className="font-mono text-[11px]">({emp.email})</span>
           </div>
-          <button
-            onClick={onClose}
-            className="px-5 py-2 bg-gray-900 text-white rounded-xl text-xs font-semibold hover:bg-gray-800 transition-colors shadow-sm"
-          >
-            Close Audit
-          </button>
+          <div className="flex items-center gap-2">
+            {onResolved && (
+              <button
+                type="button"
+                onClick={() => onResolved(record.id)}
+                className="btn btn-outline text-xs px-3 py-1.5 text-[#0C6B72] border-[#0C6B72]/40 hover:bg-[#0C6B72]/10"
+              >
+                Authorize &amp; Resolve
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="btn btn-dark text-xs px-3.5 py-1.5"
+            >
+              Close Audit
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -40,85 +40,65 @@ export default function EmployeeTable({ employees }: EmployeeTableProps) {
   );
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-      <div className="p-6 border-b border-gray-100">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Employees</h2>
+    <div id="employees" className="panel">
+      <div className="toolbar">
+        <div className="panel-title">
+          <div>
+            <h2>Employees</h2>
+          </div>
+        </div>
+        <div className="search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.6" />
+            <path d="M20 20l-4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
           <input
-            type="text"
-            placeholder="Search employees..."
+            placeholder="Search employees…"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none w-64"
           />
         </div>
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full">
+        <table>
           <thead>
-            <tr className="border-b border-gray-100">
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Name
-              </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Email
-              </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Enrolled
-              </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Status
-              </th>
-              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Joined
-              </th>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Enrolled</th>
+              <th>Status</th>
+              <th>Joined</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
+          <tbody>
             {paginated.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-gray-400">
+                <td colSpan={5} style={{ textAlign: "center", padding: "32px", color: "var(--text-faint)" }}>
                   {search ? "No employees match your search" : "No employees found"}
                 </td>
               </tr>
             ) : (
               paginated.map((employee) => (
-                <tr key={employee.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4">
-                    <span className="font-medium text-gray-900">
-                      {employee.first_name} {employee.last_name}
+                <tr key={employee.id}>
+                  <td className="cell-name">
+                    {employee.first_name} {employee.last_name}
+                  </td>
+                  <td className="cell-sub">{employee.email}</td>
+                  <td>
+                    <span className={`pill ${employee.is_enrolled ? "pill-verified" : "pill-moderate"}`}>
+                      {employee.is_enrolled ? "Enrolled" : "Pending"}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-gray-600 text-sm">
-                    {employee.email}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        employee.is_enrolled
-                          ? "bg-green-100 text-green-800"
-                          : "bg-yellow-100 text-yellow-800"
-                      }`}
-                    >
-                      {employee.is_enrolled ? "✓ Enrolled" : "Pending"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        employee.is_active
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }`}
-                    >
+                  <td>
+                    <span className={`pill ${employee.is_active ? "pill-verified" : "pill-flagged"}`}>
                       {employee.is_active ? "Active" : "Inactive"}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-gray-500 text-sm">
+                  <td className="mono" style={{ color: "var(--text-mute)" }}>
                     {new Date(employee.created_at).toLocaleDateString()}
                   </td>
                 </tr>
@@ -130,8 +110,8 @@ export default function EmployeeTable({ employees }: EmployeeTableProps) {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
-          <p className="text-sm text-gray-500">
+        <div className="px-5 py-3 border-t border-[var(--line)] flex items-center justify-between text-xs text-[var(--text-mute)]">
+          <p>
             Showing {(currentPage - 1) * itemsPerPage + 1}–
             {Math.min(currentPage * itemsPerPage, filtered.length)} of{" "}
             {filtered.length}
@@ -140,14 +120,14 @@ export default function EmployeeTable({ employees }: EmployeeTableProps) {
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               disabled={currentPage === 1}
-              className="px-3 py-1 border border-gray-300 rounded-lg text-sm disabled:opacity-40 hover:bg-gray-50"
+              className="btn btn-outline btn-sm disabled:opacity-40"
             >
               Previous
             </button>
             <button
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages}
-              className="px-3 py-1 border border-gray-300 rounded-lg text-sm disabled:opacity-40 hover:bg-gray-50"
+              className="btn btn-outline btn-sm disabled:opacity-40"
             >
               Next
             </button>

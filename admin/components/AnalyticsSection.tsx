@@ -186,356 +186,397 @@ export default function AnalyticsSection({ logs, employees = [] }: AnalyticsSect
     };
   }, [filteredLogs]);
 
+  // Format average arrival time into hours and AM/PM parts
+  const [timeValue, timePeriod] = metrics.avgArrivalTime.split(" ");
+
+  // Weekly average
+  const totalWeeklyCheckins = metrics.dailyVolume.reduce((acc, d) => acc + d.count, 0);
+  const weeklyAvg = (totalWeeklyCheckins / 7).toFixed(1);
+
+  // Punctuality percentages for stacked bar
+  const totalPunctuality = (metrics.onTimeCount + metrics.graceCount + metrics.lateCount) || 1;
+  const onTimePct = Math.round((metrics.onTimeCount / totalPunctuality) * 100);
+  const gracePct = Math.round((metrics.graceCount / totalPunctuality) * 100);
+  const latePct = Math.round((metrics.lateCount / totalPunctuality) * 100);
+
+  // Trust spectrum percentages for stacked bar
+  const totalTrust = (metrics.highTrustCount + metrics.modTrustCount + metrics.flaggedCount) || 1;
+  const highTrustPct = Math.round((metrics.highTrustCount / totalTrust) * 100);
+  const modTrustPct = Math.round((metrics.modTrustCount / totalTrust) * 100);
+  const flaggedPct = Math.round((metrics.flaggedCount / totalTrust) * 100);
+
+  const slotList = [
+    "07:00",
+    "07:30",
+    "08:00",
+    "08:30",
+    "09:00",
+    "09:30",
+    "10:00",
+    "10:30",
+    "11:00+",
+  ];
+
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden space-y-6 p-6">
-      {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-5">
-        <div>
-          <div className="flex items-center space-x-2.5">
-            <span className="text-2xl">📊</span>
-            <div>
-              <h3 className="text-lg font-bold text-gray-900">Workforce & Biometrics Analytics</h3>
-              <p className="text-xs text-gray-500">
-                Turnout trends, arrival rush-hour distribution, trust index, and punch channel telemetry
-              </p>
-            </div>
+    <div id="analytics" className="panel">
+      {/* Panel Head */}
+      <div className="panel-head">
+        <div className="panel-title">
+          <div>
+            <h2>Workforce &amp; biometrics analytics</h2>
+            <p>Turnout trends, arrival distribution, trust index and punch-channel telemetry</p>
           </div>
         </div>
-
-        {/* Time Range Selector */}
-        <div className="inline-flex rounded-xl bg-gray-100 p-1 border border-gray-200 text-xs">
-          {(
-            [
-              { id: "7d", label: "Last 7 Days" },
-              { id: "30d", label: "Last 30 Days" },
-              { id: "all", label: "All Time" },
-            ] as const
-          ).map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTimeRange(t.id)}
-              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
-                timeRange === t.id
-                  ? "bg-white text-blue-600 shadow-sm"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="segmented">
+          <button
+            className={timeRange === "7d" ? "active" : ""}
+            onClick={() => setTimeRange("7d")}
+          >
+            7d
+          </button>
+          <button
+            className={timeRange === "30d" ? "active" : ""}
+            onClick={() => setTimeRange("30d")}
+          >
+            30d
+          </button>
+          <button
+            className={timeRange === "all" ? "active" : ""}
+            onClick={() => setTimeRange("all")}
+          >
+            All
+          </button>
         </div>
       </div>
 
-      {/* Top Executive KPI Ribbons */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Avg Arrival Time */}
-        <div className="bg-gradient-to-br from-blue-50/60 to-indigo-50/30 p-4 rounded-xl border border-blue-100/80">
-          <div className="flex items-center justify-between text-xs text-blue-800/80 font-semibold mb-1">
-            <span>Avg Arrival Time</span>
-            <span>⏱️</span>
+      {/* Stat Row */}
+      <div className="stat-row flex-wrap sm:flex-nowrap">
+        <div className="stat-block">
+          <div className="stat-block-label">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M12 7.5V12l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            Avg. arrival time
           </div>
-          <div className="text-2xl font-extrabold text-blue-950 font-mono tracking-tight">
-            {metrics.avgArrivalTime}
+          <div className="stat-block-value">
+            {timeValue} <small>{timePeriod || "AM"}</small>
           </div>
-          <div className="flex items-center space-x-1.5 mt-2">
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-              Target: 09:00 AM
-            </span>
-            <span className="text-[11px] text-gray-500">Facility Shift</span>
-          </div>
+          <div className="stat-block-sub">Target 09:00 AM · facility shift</div>
         </div>
 
-        {/* KPI 2: Punctuality Rate */}
-        <div className="bg-gradient-to-br from-emerald-50/60 to-green-50/30 p-4 rounded-xl border border-emerald-100/80">
-          <div className="flex items-center justify-between text-xs text-emerald-800/80 font-semibold mb-1">
-            <span>Punctuality Compliance</span>
-            <span>🎯</span>
+        <div className="stat-block">
+          <div className="stat-block-label">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.6" />
+              <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.6" />
+              <circle cx="12" cy="12" r="0.8" fill="currentColor" />
+            </svg>
+            Punctuality compliance
           </div>
-          <div className="text-2xl font-extrabold text-emerald-900 font-mono tracking-tight">
+          <div
+            className="stat-block-value"
+            style={{
+              color:
+                metrics.onTimeRate >= 80
+                  ? "var(--teal)"
+                  : metrics.onTimeRate >= 50
+                  ? "var(--amber)"
+                  : "var(--red)",
+            }}
+          >
             {metrics.onTimeRate}%
           </div>
-          <div className="text-[11px] text-emerald-700 font-medium mt-2 flex items-center gap-1">
-            <span>✓</span>
-            <span>{metrics.onTimeCount + metrics.graceCount} on-time vs {metrics.lateCount} late</span>
+          <div className="stat-block-sub">
+            {metrics.onTimeCount + metrics.graceCount} on-time vs. {metrics.lateCount} late
           </div>
         </div>
 
-        {/* KPI 3: Biometric Trust Index */}
-        <div className="bg-gradient-to-br from-purple-50/60 to-violet-50/30 p-4 rounded-xl border border-purple-100/80">
-          <div className="flex items-center justify-between text-xs text-purple-800/80 font-semibold mb-1">
-            <span>Biometric Trust Index</span>
-            <span>🛡️</span>
+        <div className="stat-block">
+          <div className="stat-block-label">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M12 3l7 3v5c0 5-3 8.3-7 10-4-1.7-7-5-7-10V6l7-3Z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Biometric trust index
           </div>
-          <div className="text-2xl font-extrabold text-purple-950 font-mono tracking-tight">
+          <div className="stat-block-value" style={{ color: "var(--teal)" }}>
             {metrics.avgTrustScore}%
           </div>
-          <div className="text-[11px] text-purple-700 font-medium mt-2 flex items-center gap-1">
-            <span>{metrics.flaggedCount === 0 ? "🔒 100% Anti-Spoof Pass" : `⚠️ ${metrics.flaggedCount} Flagged Checks`}</span>
+          <div className="stat-block-sub">
+            {metrics.flaggedCount} flagged check{metrics.flaggedCount === 1 ? "" : "s"} this period
           </div>
         </div>
 
-        {/* KPI 4: Punch Channel Telemetry */}
-        <div className="bg-gradient-to-br from-amber-50/60 to-orange-50/30 p-4 rounded-xl border border-amber-100/80">
-          <div className="flex items-center justify-between text-xs text-amber-800/80 font-semibold mb-1">
-            <span>Terminal Adoption</span>
-            <span>📱</span>
+        <div className="stat-block">
+          <div className="stat-block-label">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <rect x="7" y="2.5" width="10" height="19" rx="2" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M10.5 19h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            Terminal adoption
           </div>
-          <div className="text-2xl font-extrabold text-amber-950 font-mono tracking-tight">
-            {metrics.mobilePct}% <span className="text-xs text-amber-700 font-normal">Mobile</span>
+          <div className="stat-block-value">
+            {metrics.mobilePct}% <small>mobile</small>
           </div>
-          <div className="text-[11px] text-amber-800 font-medium mt-2">
-            {metrics.kioskPct}% Kiosk Tablet • {metrics.offlinePct}% Offline Queue
+          <div className="stat-block-sub">
+            {metrics.kioskPct}% kiosk tablet · {metrics.offlinePct}% offline queue
           </div>
         </div>
       </div>
 
-      {/* Main Visual Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
-        {/* Chart 1: Arrival Rush-Hour Distribution Histogram */}
-        <div className="bg-slate-50/60 border border-slate-200/80 rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
+      {/* Charts Row */}
+      <div className="charts-row">
+        {/* Left: 30-minute arrival histogram */}
+        <div className="chart-col">
+          <div className="chart-col-head">
             <div>
-              <h4 className="font-bold text-gray-900 text-sm flex items-center gap-1.5">
-                <span>⏱️</span>
-                <span>Morning Arrival Rush-Hour Histogram</span>
-              </h4>
-              <p className="text-xs text-gray-500">Check-in frequency by 30-min window (Marrakesh Hub)</p>
+              <h3>Morning arrival, by 30-minute window</h3>
+              <p>Marrakesh Hub · check-in frequency</p>
             </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 uppercase tracking-wider">
-              Peak Analysis
-            </span>
           </div>
 
-          {/* Histogram Bar Visualization */}
-          <div className="space-y-2 pt-2">
-            {Object.entries(metrics.hourlySlots).map(([slot, count]) => {
-              const widthPct = Math.round((count / metrics.maxSlotCount) * 100);
-              const isTargetSlot = slot === "08:30" || slot === "09:00";
+          <div className="space-y-1">
+            {slotList.map((slot) => {
+              const val = metrics.hourlySlots[slot] || 0;
+              const fillPct = (val / metrics.maxSlotCount) * 100;
+
+              let fillColor = "var(--teal)";
+              if (slot === "08:30" || slot === "09:00") {
+                fillColor = "#3E6FB0";
+              } else if (slot > "09:00" || slot === "11:00+") {
+                fillColor = "var(--red)";
+              }
+
               return (
-                <div key={slot} className="flex items-center text-xs gap-2">
-                  <span className="w-14 font-mono text-gray-500 text-[11px] text-right">{slot}</span>
-                  <div className="flex-1 bg-gray-200/70 h-5 rounded-md overflow-hidden relative">
-                    <div
-                      style={{ width: `${Math.max(widthPct, count > 0 ? 12 : 2)}%` }}
-                      className={`h-full rounded-md transition-all duration-500 flex items-center justify-end pr-2 text-[10px] font-bold text-white ${
-                        isTargetSlot
-                          ? "bg-blue-600 shadow-sm"
-                          : slot.startsWith("10") || slot.startsWith("11")
-                            ? "bg-rose-500"
-                            : "bg-emerald-500"
-                      }`}
-                    >
-                      {count > 0 ? count : ""}
-                    </div>
+                <div key={slot} className="hist-row">
+                  <span className="hist-time">{slot}</span>
+                  <div className="hist-track">
+                    {val > 0 && (
+                      <div
+                        className="hist-fill"
+                        style={{ width: `${Math.max(fillPct, 6)}%`, background: fillColor }}
+                      />
+                    )}
                   </div>
-                  <span className="w-6 font-mono text-gray-700 text-right font-semibold">{count}</span>
+                  <span className="hist-val">{val}</span>
                 </div>
               );
             })}
           </div>
 
-          <div className="flex items-center justify-between text-[11px] text-gray-400 border-t border-gray-200/60 pt-2.5">
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Early
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-sm bg-blue-600"></span> Target (08:30 - 09:00)
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-sm bg-rose-500"></span> Late (&gt;09:15)
-              </span>
-            </div>
-            <span className="font-semibold text-gray-600">Total: {metrics.checkInsCount} Check-ins</span>
+          <div className="legend">
+            <span>
+              <span className="dot dot-teal"></span>Early &lt;08:30
+            </span>
+            <span>
+              <span className="dot" style={{ background: "#3E6FB0" }}></span>Target 08:30–09:00
+            </span>
+            <span>
+              <span className="dot dot-red"></span>Late &gt;09:15
+            </span>
           </div>
         </div>
 
-        {/* Chart 2: 7-Day Attendance Volume & Turnout */}
-        <div className="bg-slate-50/60 border border-slate-200/80 rounded-2xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
+        {/* Right: 7-day attendance turnout bars */}
+        <div className="chart-col">
+          <div className="chart-col-head">
             <div>
-              <h4 className="font-bold text-gray-900 text-sm flex items-center gap-1.5">
-                <span>📈</span>
-                <span>7-Day Attendance Turnout Trend</span>
-              </h4>
-              <p className="text-xs text-gray-500">Daily worker check-ins over the past week</p>
+              <h3>7-day attendance turnout</h3>
+              <p>Daily worker check-ins</p>
             </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 uppercase tracking-wider">
-              Turnout
-            </span>
           </div>
 
-          {/* Area/Bar visualization for 7 days */}
-          <div className="flex items-end justify-between h-40 pt-4 px-2">
-            {metrics.dailyVolume.map((item, idx) => {
-              const heightPct = Math.round((item.count / metrics.maxDailyCount) * 100);
+          <div className="bars">
+            {metrics.dailyVolume.map((d, idx) => {
+              const isToday = idx === metrics.dailyVolume.length - 1;
+              const heightPct = (d.count / metrics.maxDailyCount) * 100;
+
               return (
-                <div key={idx} className="flex flex-col items-center flex-1 h-full justify-end group">
-                  <span className="text-[11px] font-mono font-bold text-blue-600 mb-1">
-                    {item.count > 0 ? item.count : "—"}
+                <div key={d.dateLabel} className="bar-col">
+                  <span className={`bar-val ${d.count === 0 ? "zero" : ""}`}>
+                    {d.count > 0 ? d.count : "–"}
                   </span>
-                  <div className="w-8 sm:w-10 bg-gray-200/70 h-28 rounded-t-lg flex items-end overflow-hidden">
-                    <div
-                      style={{ height: `${Math.max(heightPct, item.count > 0 ? 15 : 4)}%` }}
-                      className="w-full bg-gradient-to-t from-blue-600 to-indigo-500 rounded-t-lg transition-all duration-500 group-hover:brightness-110"
-                    />
-                  </div>
-                  <span className="text-[11px] font-semibold text-gray-700 mt-2">{item.dayName}</span>
-                  <span className="text-[9px] text-gray-400">{item.dateLabel}</span>
+                  <div
+                    className={`bar ${isToday ? "today" : ""}`}
+                    style={{
+                      height: `${d.count > 0 ? Math.max(heightPct, 10) : 2}px`,
+                      maxHeight: "85px",
+                    }}
+                  />
                 </div>
               );
             })}
           </div>
 
-          <div className="flex items-center justify-between text-[11px] text-gray-500 border-t border-gray-200/60 pt-2.5">
-            <span>Weekly Average: {((metrics.checkInsCount || 1) / 7).toFixed(1)} check-ins/day</span>
-            <span className="font-semibold text-blue-600">Peak: {metrics.maxDailyCount} arrivals</span>
+          <div className="bar-labels">
+            {metrics.dailyVolume.map((d) => (
+              <div key={d.dateLabel} className="bar-label-col">
+                <div className="d">{d.dayName}</div>
+                <div className="m">{d.dateLabel}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="chart-foot">
+            <span>
+              Weekly average <strong>{weeklyAvg}</strong> check-ins/day
+            </span>
+            <span>
+              Peak <strong>{metrics.maxDailyCount}</strong> arrivals
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Secondary Intelligence Breakdown: Punctuality Donut vs Trust Spectrum vs Channels */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-        {/* Punctuality Donut Breakdown */}
-        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
-          <div className="flex justify-between items-center text-xs">
-            <span className="font-bold text-gray-800">Punctuality Compliance</span>
-            <span className="font-mono text-emerald-600 font-bold">{metrics.onTimeRate}%</span>
+      {/* Metric Row: 3 Stacked Bars */}
+      <div className="metric-row">
+        {/* Block 1: Punctuality */}
+        <div className="metric-block">
+          <div className="metric-head">
+            <h4>Punctuality compliance</h4>
+            <span className="v">{metrics.onTimeRate}%</span>
           </div>
-
-          {/* Stacked Progress Bar */}
-          <div className="w-full h-3.5 bg-gray-100 rounded-full flex overflow-hidden">
-            <div
-              style={{ width: `${Math.round((metrics.onTimeCount / (metrics.checkInsCount || 1)) * 100)}%` }}
-              className="bg-emerald-500 h-full"
-              title="On Time"
-            />
-            <div
-              style={{ width: `${Math.round((metrics.graceCount / (metrics.checkInsCount || 1)) * 100)}%` }}
-              className="bg-amber-400 h-full"
-              title="Grace Period"
-            />
-            <div
-              style={{ width: `${Math.round((metrics.lateCount / (metrics.checkInsCount || 1)) * 100)}%` }}
-              className="bg-rose-500 h-full"
-              title="Late Arrival"
-            />
+          <div className="stack-bar">
+            {onTimePct > 0 && (
+              <div
+                className="stack-seg"
+                style={{ width: `${onTimePct}%`, background: "var(--teal)" }}
+              />
+            )}
+            {gracePct > 0 && (
+              <div
+                className="stack-seg"
+                style={{ width: `${gracePct}%`, background: "var(--amber)" }}
+              />
+            )}
+            {latePct > 0 && (
+              <div
+                className="stack-seg"
+                style={{ width: `${latePct}%`, background: "var(--red)" }}
+              />
+            )}
           </div>
-
-          <div className="space-y-1.5 text-xs">
-            <div className="flex justify-between text-gray-600">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500"></span> On Time (&lt;09:00 AM)
+          <ul className="metric-legend">
+            <li>
+              <span className="l">
+                <span className="dot dot-teal"></span>On time &lt;09:00
               </span>
-              <span className="font-semibold text-gray-900">{metrics.onTimeCount}</span>
-            </div>
-            <div className="flex justify-between text-gray-600">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-amber-400"></span> Grace Period (09:00–09:15)
+              <span className="n">{metrics.onTimeCount}</span>
+            </li>
+            <li>
+              <span className="l">
+                <span className="dot dot-amber"></span>Grace 09:00–09:15
               </span>
-              <span className="font-semibold text-gray-900">{metrics.graceCount}</span>
-            </div>
-            <div className="flex justify-between text-gray-600">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-rose-500"></span> Late Arrival (&gt;09:15)
+              <span className="n">{metrics.graceCount}</span>
+            </li>
+            <li>
+              <span className="l">
+                <span className="dot dot-red"></span>Late &gt;09:15
               </span>
-              <span className="font-semibold text-gray-900">{metrics.lateCount}</span>
-            </div>
-          </div>
+              <span className="n">{metrics.lateCount}</span>
+            </li>
+          </ul>
         </div>
 
-        {/* Biometric Trust Score Spectrum */}
-        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
-          <div className="flex justify-between items-center text-xs">
-            <span className="font-bold text-gray-800">Biometric Integrity</span>
-            <span className="font-mono text-purple-700 font-bold">{metrics.avgTrustScore}% Avg</span>
+        {/* Block 2: Biometric Integrity */}
+        <div className="metric-block">
+          <div className="metric-head">
+            <h4>Biometric integrity</h4>
+            <span className="v">{metrics.avgTrustScore}%</span>
           </div>
-
-          <div className="w-full h-3.5 bg-gray-100 rounded-full flex overflow-hidden">
-            <div
-              style={{ width: `${Math.round((metrics.highTrustCount / (metrics.totalPunches || 1)) * 100)}%` }}
-              className="bg-purple-600 h-full"
-              title="High Trust"
-            />
-            <div
-              style={{ width: `${Math.round((metrics.modTrustCount / (metrics.totalPunches || 1)) * 100)}%` }}
-              className="bg-amber-400 h-full"
-              title="Moderate"
-            />
-            <div
-              style={{ width: `${Math.round((metrics.flaggedCount / (metrics.totalPunches || 1)) * 100)}%` }}
-              className="bg-rose-500 h-full"
-              title="Flagged"
-            />
+          <div className="stack-bar">
+            {highTrustPct > 0 && (
+              <div
+                className="stack-seg"
+                style={{ width: `${highTrustPct}%`, background: "var(--teal)" }}
+              />
+            )}
+            {modTrustPct > 0 && (
+              <div
+                className="stack-seg"
+                style={{ width: `${modTrustPct}%`, background: "var(--amber)" }}
+              />
+            )}
+            {flaggedPct > 0 && (
+              <div
+                className="stack-seg"
+                style={{ width: `${flaggedPct}%`, background: "var(--red)" }}
+              />
+            )}
           </div>
-
-          <div className="space-y-1.5 text-xs">
-            <div className="flex justify-between text-gray-600">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-purple-600"></span> Verified (&gt;90%)
+          <ul className="metric-legend">
+            <li>
+              <span className="l">
+                <span className="dot dot-teal"></span>Verified &gt;90%
               </span>
-              <span className="font-semibold text-gray-900">{metrics.highTrustCount}</span>
-            </div>
-            <div className="flex justify-between text-gray-600">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-amber-400"></span> Moderate (70–89%)
+              <span className="n">{metrics.highTrustCount}</span>
+            </li>
+            <li>
+              <span className="l">
+                <span className="dot dot-amber"></span>Moderate 70–89%
               </span>
-              <span className="font-semibold text-gray-900">{metrics.modTrustCount}</span>
-            </div>
-            <div className="flex justify-between text-gray-600">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-rose-500"></span> Flagged / Anomaly
+              <span className="n">{metrics.modTrustCount}</span>
+            </li>
+            <li>
+              <span className="l">
+                <span className="dot dot-red"></span>Flagged / anomaly
               </span>
-              <span className="font-semibold text-gray-900">{metrics.flaggedCount}</span>
-            </div>
-          </div>
+              <span className="n">{metrics.flaggedCount}</span>
+            </li>
+          </ul>
         </div>
 
-        {/* Channel & Device Telemetry */}
-        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
-          <div className="flex justify-between items-center text-xs">
-            <span className="font-bold text-gray-800">Punch Channels</span>
-            <span className="font-mono text-blue-700 font-bold">{metrics.totalPunches} Total</span>
+        {/* Block 3: Punch Channels */}
+        <div className="metric-block">
+          <div className="metric-head">
+            <h4>Punch channels</h4>
+            <span className="v">{metrics.totalPunches} total</span>
           </div>
-
-          <div className="w-full h-3.5 bg-gray-100 rounded-full flex overflow-hidden">
-            <div
-              style={{ width: `${metrics.mobilePct}%` }}
-              className="bg-blue-600 h-full"
-              title="Mobile App"
-            />
-            <div
-              style={{ width: `${metrics.kioskPct}%` }}
-              className="bg-teal-500 h-full"
-              title="Reception Kiosk"
-            />
-            <div
-              style={{ width: `${metrics.offlinePct}%` }}
-              className="bg-amber-500 h-full"
-              title="Offline Queue"
-            />
+          <div className="stack-bar">
+            {metrics.mobilePct > 0 && (
+              <div
+                className="stack-seg"
+                style={{ width: `${metrics.mobilePct}%`, background: "#3E6FB0" }}
+              />
+            )}
+            {metrics.kioskPct > 0 && (
+              <div
+                className="stack-seg"
+                style={{ width: `${metrics.kioskPct}%`, background: "var(--teal)" }}
+              />
+            )}
+            {metrics.offlinePct > 0 && (
+              <div
+                className="stack-seg"
+                style={{ width: `${metrics.offlinePct}%`, background: "var(--line-strong)" }}
+              />
+            )}
           </div>
-
-          <div className="space-y-1.5 text-xs">
-            <div className="flex justify-between text-gray-600">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-blue-600"></span> 📱 Mobile Self-Service
+          <ul className="metric-legend">
+            <li>
+              <span className="l">
+                <span className="dot" style={{ background: "#3E6FB0" }}></span>Mobile self-service
               </span>
-              <span className="font-semibold text-gray-900">{metrics.mobilePct}%</span>
-            </div>
-            <div className="flex justify-between text-gray-600">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-teal-500"></span> 🖥️ Reception Kiosk
+              <span className="n">{metrics.mobilePct}%</span>
+            </li>
+            <li>
+              <span className="l">
+                <span className="dot dot-teal"></span>Reception kiosk
               </span>
-              <span className="font-semibold text-gray-900">{metrics.kioskPct}%</span>
-            </div>
-            <div className="flex justify-between text-gray-600">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-amber-500"></span> ⚡ Offline Queue Sync
+              <span className="n">{metrics.kioskPct}%</span>
+            </li>
+            <li>
+              <span className="l">
+                <span className="dot dot-line"></span>Offline queue sync
               </span>
-              <span className="font-semibold text-gray-900">{metrics.offlinePct}%</span>
-            </div>
-          </div>
+              <span className="n">{metrics.offlinePct}%</span>
+            </li>
+          </ul>
         </div>
       </div>
     </div>

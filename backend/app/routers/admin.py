@@ -223,9 +223,12 @@ async def resolve_fraud_alert(
     return {"message": "Fraud alert resolved", "data": response.data}
 
 
-def process_shift_timesheets(logs: list):
+def process_shift_timesheets(logs: Optional[list] = None):
     """Pair daily check-ins and check-outs to calculate shift durations, punctuality, and overtime."""
     from collections import defaultdict
+
+    if not logs:
+        logs = []
 
     daily_groups = defaultdict(list)
     for log in logs:
@@ -634,109 +637,134 @@ async def send_attendance_digest(
     payload: dict,
 ):
     """Send automated or on-demand HR attendance digest email."""
-    supabase = get_supabase_client()
-    recipient_email = payload.get("recipient_email", "nelsonizah13@gmail.com").strip()
-    report_type = payload.get("report_type", "daily")
-    hr_name = payload.get("hr_name", "HR Administrator")
+    try:
+        supabase = get_supabase_client()
+        recipient_email = payload.get("recipient_email", "nelsonizah13@gmail.com").strip()
+        report_type = payload.get("report_type", "daily")
+        hr_name = payload.get("hr_name", "HR Administrator")
 
-    timesheets, metrics, _ = process_shift_timesheets(None)
+        # Fetch actual attendance logs
+        logs_res = (
+            supabase.table("attendance_logs")
+            .select("*, employees(first_name, last_name, email, employee_code), sites(name)")
+            .order("checked_at", desc=False)
+            .limit(2000)
+            .execute()
+        )
+        logs = logs_res.data or []
+        timesheets, metrics, _ = process_shift_timesheets(logs)
 
-    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    if report_type == "daily":
-        active_shifts = [ts for ts in timesheets if ts["date"] == today_iso]
-        if not active_shifts:
-            active_shifts = timesheets[:5]
-    else:
-        active_shifts = timesheets[:15]
+        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if report_type == "daily":
+            active_shifts = [ts for ts in timesheets if ts["date"] == today_iso]
+            if not active_shifts:
+                active_shifts = timesheets[:5]
+        else:
+            active_shifts = timesheets[:15]
 
-    emp_res = supabase.table("employees").select("id", count="exact").eq("is_active", True).execute()
-    total_emp = emp_res.count or 1
+        emp_res = supabase.table("employees").select("id", count="exact").eq("is_active", True).execute()
+        total_emp = emp_res.count or 1
 
-    flagged_res = supabase.table("attendance_logs").select("id", count="exact").eq("status", "flagged").execute()
-    flagged_count = flagged_res.count or 0
+        flagged_res = supabase.table("attendance_logs").select("id", count="exact").eq("status", "flagged").execute()
+        flagged_count = flagged_res.count or 0
 
-    present_workers = set(s["employee_id"] for s in active_shifts)
+        present_workers = set(s["employee_id"] for s in active_shifts)
 
-    email_shifts = []
-    for s in active_shifts:
-        email_shifts.append({
-            "employee_name": s.get("employee_name", "Felix Izah"),
-            "employee_code": s.get("employee_code", "FP-64164"),
-            "check_in_time": s.get("check_in_time") or "—",
-            "check_out_time": s.get("check_out_time") or "In Progress",
-            "duration": s.get("formatted_duration") or "—",
-            "is_on_time": s.get("arrival_status") == "on_time",
-            "trust_score": s.get("trust_score", 95.0),
-        })
+        email_shifts = []
+        for s in active_shifts:
+            email_shifts.append({
+                "employee_name": s.get("employee_name", "Felix Izah"),
+                "employee_code": s.get("employee_code", "FP-64164"),
+                "check_in_time": s.get("check_in_time") or "—",
+                "check_out_time": s.get("check_out_time") or "In Progress",
+                "duration": s.get("formatted_duration") or "—",
+                "is_on_time": s.get("arrival_status") == "on_time",
+                "trust_score": s.get("trust_score", 95.0),
+            })
 
-    digest_data = {
-        "date_str": datetime.now(timezone.utc).strftime("%A, %B %d, %Y"),
-        "total_employees": total_emp,
-        "present_count": len(present_workers) if present_workers else metrics["currently_on_site"],
-        "punctuality_rate": f"{metrics['on_time_rate_pct']}%",
-        "total_hours": f"{metrics['total_hours_worked']} hrs",
-        "total_overtime": f"{metrics['total_overtime_hours']} hrs",
-        "flagged_count": flagged_count,
-        "shifts": email_shifts,
-    }
+        digest_data = {
+            "date_str": datetime.now(timezone.utc).strftime("%A, %B %d, %Y"),
+            "total_employees": total_emp,
+            "present_count": len(present_workers) if present_workers else metrics.get("currently_on_site", 1),
+            "punctuality_rate": f"{metrics.get('on_time_rate_pct', 100)}%",
+            "total_hours": f"{metrics.get('total_hours_worked', 0)} hrs",
+            "total_overtime": f"{metrics.get('total_overtime_hours', 0)} hrs",
+            "flagged_count": flagged_count,
+            "shifts": email_shifts,
+        }
 
-    success = send_hr_attendance_digest(
-        to_email=recipient_email,
-        hr_name=hr_name,
-        report_type=report_type,
-        digest_data=digest_data,
-    )
+        success = send_hr_attendance_digest(
+            to_email=recipient_email,
+            hr_name=hr_name,
+            report_type=report_type,
+            digest_data=digest_data,
+        )
 
-    return {
-        "success": success,
-        "recipient_email": recipient_email,
-        "report_type": report_type,
-        "digest_data": digest_data,
-        "message": f"Attendance digest successfully sent to {recipient_email}!"
-    }
+        return {
+            "success": success,
+            "recipient_email": recipient_email,
+            "report_type": report_type,
+            "digest_data": digest_data,
+            "message": f"Attendance digest successfully sent to {recipient_email}!"
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=400, detail=f"Digest generation error: {str(e)}")
 
 
 @router.get("/digest/preview")
 async def preview_attendance_digest(report_type: str = "daily"):
     """Preview HR attendance digest data and summary before sending."""
-    supabase = get_supabase_client()
-    timesheets, metrics, _ = process_shift_timesheets(None)
-    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        supabase = get_supabase_client()
+        logs_res = (
+            supabase.table("attendance_logs")
+            .select("*, employees(first_name, last_name, email, employee_code), sites(name)")
+            .order("checked_at", desc=False)
+            .limit(2000)
+            .execute()
+        )
+        logs = logs_res.data or []
+        timesheets, metrics, _ = process_shift_timesheets(logs)
+        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    if report_type == "daily":
-        active_shifts = [ts for ts in timesheets if ts["date"] == today_iso] or timesheets[:5]
-    else:
-        active_shifts = timesheets[:15]
+        if report_type == "daily":
+            active_shifts = [ts for ts in timesheets if ts["date"] == today_iso] or timesheets[:5]
+        else:
+            active_shifts = timesheets[:15]
 
-    emp_res = supabase.table("employees").select("id", count="exact").eq("is_active", True).execute()
-    total_emp = emp_res.count or 1
+        emp_res = supabase.table("employees").select("id", count="exact").eq("is_active", True).execute()
+        total_emp = emp_res.count or 1
 
-    flagged_res = supabase.table("attendance_logs").select("id", count="exact").eq("status", "flagged").execute()
-    flagged_count = flagged_res.count or 0
+        flagged_res = supabase.table("attendance_logs").select("id", count="exact").eq("status", "flagged").execute()
+        flagged_count = flagged_res.count or 0
 
-    present_workers = set(s["employee_id"] for s in active_shifts)
+        present_workers = set(s["employee_id"] for s in active_shifts)
 
-    email_shifts = []
-    for s in active_shifts:
-        email_shifts.append({
-            "employee_name": s.get("employee_name", "Felix Izah"),
-            "employee_code": s.get("employee_code", "FP-64164"),
-            "check_in_time": s.get("check_in_time") or "—",
-            "check_out_time": s.get("check_out_time") or "In Progress",
-            "duration": s.get("formatted_duration") or "—",
-            "is_on_time": s.get("arrival_status") == "on_time",
-            "trust_score": s.get("trust_score", 95.0),
-        })
+        email_shifts = []
+        for s in active_shifts:
+            email_shifts.append({
+                "employee_name": s.get("employee_name", "Felix Izah"),
+                "employee_code": s.get("employee_code", "FP-64164"),
+                "check_in_time": s.get("check_in_time") or "—",
+                "check_out_time": s.get("check_out_time") or "In Progress",
+                "duration": s.get("formatted_duration") or "—",
+                "is_on_time": s.get("arrival_status") == "on_time",
+                "trust_score": s.get("trust_score", 95.0),
+            })
 
-    return {
-        "date_str": datetime.now(timezone.utc).strftime("%A, %B %d, %Y"),
-        "total_employees": total_emp,
-        "present_count": len(present_workers) if present_workers else metrics["currently_on_site"],
-        "punctuality_rate": f"{metrics['on_time_rate_pct']}%",
-        "total_hours": f"{metrics['total_hours_worked']} hrs",
-        "total_overtime": f"{metrics['total_overtime_hours']} hrs",
-        "flagged_count": flagged_count,
-        "shifts": email_shifts,
-    }
+        return {
+            "date_str": datetime.now(timezone.utc).strftime("%A, %B %d, %Y"),
+            "total_employees": total_emp,
+            "present_count": len(present_workers) if present_workers else metrics.get("currently_on_site", 1),
+            "punctuality_rate": f"{metrics.get('on_time_rate_pct', 100)}%",
+            "total_hours": f"{metrics.get('total_hours_worked', 0)} hrs",
+            "total_overtime": f"{metrics.get('total_overtime_hours', 0)} hrs",
+            "flagged_count": flagged_count,
+            "shifts": email_shifts,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Digest preview error: {str(e)}")
 
 

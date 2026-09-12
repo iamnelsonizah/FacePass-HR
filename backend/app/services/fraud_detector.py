@@ -222,28 +222,28 @@ class FraudDetectorService:
         supabase_client,
         company_id: str,
         employee_id: str,
-        attendance_id: str,
+        attendance_id: Optional[str],
         alert_type: str,
         severity: str,
         details: dict,
+        risk_score: Optional[float] = None,
     ) -> Optional[str]:
         """Create a persistent security alert in the fraud_alerts table."""
         try:
-            resp = (
-                supabase_client.table("fraud_alerts")
-                .insert(
-                    {
-                        "company_id": company_id,
-                        "employee_id": employee_id,
-                        "attendance_id": attendance_id,
-                        "alert_type": alert_type,
-                        "severity": severity,
-                        "details": details,
-                        "is_resolved": False,
-                    }
-                )
-                .execute()
-            )
+            merged_details = {**details}
+            if risk_score is not None:
+                merged_details["risk_score"] = risk_score
+
+            payload = {
+                "company_id": company_id,
+                "employee_id": employee_id,
+                "attendance_id": attendance_id,
+                "alert_type": alert_type,
+                "severity": severity,
+                "details": merged_details,
+                "is_resolved": False,
+            }
+            resp = supabase_client.table("fraud_alerts").insert(payload).execute()
 
             if resp.data and len(resp.data) > 0:
                 alert_id = resp.data[0].get("id")

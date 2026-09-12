@@ -67,19 +67,24 @@ export default function CreateSiteModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-      <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-lg overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+      <div className="bg-white border border-[var(--line,#E4E2DC)] rounded-[4px] shadow-xl w-full max-w-lg overflow-hidden">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/80">
-          <div className="flex items-center space-x-2">
-            <span className="text-2xl">🏢</span>
-            <h3 className="font-bold text-gray-900 text-lg">Deploy New Geofence Site</h3>
+        <div className="px-4 py-3 border-b border-[var(--line,#E4E2DC)] flex items-center justify-between bg-[var(--paper,#F6F5F1)]">
+          <div className="flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--ink,#14171C)]">
+              <path d="M3 21h18"/><path d="M9 8h1"/><path d="M9 12h1"/><path d="M9 16h1"/><path d="M14 8h1"/><path d="M14 12h1"/><path d="M14 16h1"/><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/>
+            </svg>
+            <h3 className="font-semibold text-sm text-[var(--ink,#14171C)]">Deploy New Geofence Facility</h3>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-200/50"
+            className="text-[var(--muted,#6E7175)] hover:text-[var(--ink,#14171C)] p-1 rounded transition-colors"
           >
-            ✕
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
           </button>
         </div>
 
@@ -171,20 +176,20 @@ export default function CreateSiteModal({
             </p>
           </div>
 
-          <div className="pt-2 flex items-center justify-end space-x-3">
+          <div className="pt-2 flex items-center justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-xl transition-colors"
+              className="btn btn-outline text-xs px-3 py-1.5"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
+              className="btn btn-dark text-xs px-3.5 py-1.5 disabled:opacity-50"
             >
-              {loading ? "Deploying Site..." : "Save & Activate Site ✓"}
+              {loading ? "Deploying..." : "Save & Activate Site"}
             </button>
           </div>
         </form>

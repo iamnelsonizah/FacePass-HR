@@ -40,25 +40,25 @@ SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "FacePass Attendance")
 
 def _record_email(to_email: str, subject: str, html_content: str, text_content: str):
     """Save record of sent email locally for dev inspection and testing."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    records = []
-    if os.path.exists(SENT_EMAILS_LOG):
-        try:
-            with open(SENT_EMAILS_LOG, "r", encoding="utf-8") as f:
-                records = json.load(f)
-        except Exception:
-            records = []
-
-    records.append({
-        "timestamp": datetime.utcnow().isoformat(),
-        "to_email": to_email,
-        "subject": subject,
-        "html": html_content,
-        "text": text_content,
-    })
-    # Keep last 50
-    records = records[-50:]
     try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        records = []
+        if os.path.exists(SENT_EMAILS_LOG):
+            try:
+                with open(SENT_EMAILS_LOG, "r", encoding="utf-8") as f:
+                    records = json.load(f)
+            except Exception:
+                records = []
+
+        records.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "to_email": to_email,
+            "subject": subject,
+            "html": html_content,
+            "text": text_content,
+        })
+        # Keep last 50
+        records = records[-50:]
         with open(SENT_EMAILS_LOG, "w", encoding="utf-8") as f:
             json.dump(records, f, indent=2)
     except Exception as e:

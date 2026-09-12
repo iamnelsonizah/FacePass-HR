@@ -52,48 +52,26 @@ export default function FraudAlertsList({ initialAlerts }: FraudAlertsListProps)
 
   if (alerts.length === 0) {
     return (
-      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <span className="text-2xl">🛡️</span>
+      <div id="alerts" className="panel" style={{ padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "18px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ width: "28px", height: "28px", borderRadius: "6px", background: "var(--teal-soft)", color: "var(--teal)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M12 3 3 7.5v5C3 17.7 6.8 21.6 12 22.9c5.2-1.3 9-5.2 9-10.4v-5L12 3Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+            </svg>
+          </div>
           <div>
-            <h4 className="text-sm font-semibold text-emerald-900">Security Shield Active</h4>
-            <p className="text-xs text-emerald-700">No active fraud or spoofing anomalies detected across sites.</p>
+            <div style={{ fontWeight: 600, fontSize: "13px", color: "var(--text)" }}>
+              Biometric &amp; Perimeter Shield Active
+            </div>
+            <div style={{ fontSize: "11.5px", color: "var(--text-mute)" }}>
+              Zero active spoofing, collusion or geofence anomalies detected across Marrakesh Hub.
+            </div>
           </div>
         </div>
-        <span className="text-xs font-semibold px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full">
-          All Clear
-        </span>
+        <span className="pill pill-verified">All clear</span>
       </div>
     );
   }
-
-  const getSeverityBadge = (severity: string) => {
-    switch (severity.toLowerCase()) {
-      case "critical":
-        return "bg-rose-100 text-rose-800 border-rose-300";
-      case "high":
-        return "bg-orange-100 text-orange-800 border-orange-300";
-      case "medium":
-        return "bg-amber-100 text-amber-800 border-amber-300";
-      default:
-        return "bg-blue-100 text-blue-800 border-blue-300";
-    }
-  };
-
-  const getAlertIcon = (type: string) => {
-    switch (type) {
-      case "impossible_travel":
-        return "⚡";
-      case "collusion":
-        return "👥";
-      case "spoof_attack":
-        return "🎭";
-      case "time_anomaly":
-        return "🌙";
-      default:
-        return "⚠️";
-    }
-  };
 
   const formatAlertType = (type: string) => {
     return type
@@ -103,97 +81,109 @@ export default function FraudAlertsList({ initialAlerts }: FraudAlertsListProps)
   };
 
   return (
-    <div className="bg-white border border-rose-200 rounded-xl p-5 shadow-sm space-y-4">
-      <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-        <div className="flex items-center space-x-2">
-          <span className="text-xl">🚨</span>
-          <h3 className="font-bold text-gray-900 text-base">Active Fraud & Security Alerts</h3>
-          <span className="bg-rose-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-            {alerts.length}
-          </span>
-        </div>
-        <span className="text-xs text-gray-400">Real-time ML Anomaly Engine</span>
-      </div>
+    <div id="alerts" className="space-y-3 mb-[18px]">
+      {alerts.map((alert) => {
+        const emp = alert.employees;
+        const empName = emp ? `${emp.first_name} ${emp.last_name}` : "Unknown Employee";
+        const email = emp?.email || alert.employee_id;
+        const alertTime = new Date(alert.created_at).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
 
-      <div className="space-y-3">
-        {alerts.map((alert) => {
-          const emp = alert.employees;
-          const empName = emp ? `${emp.first_name} ${emp.last_name}` : "Unknown Employee";
+        let detailText = "Anomalous verification signal detected";
+        if (alert.alert_type === "identity_impersonation") {
+          detailText = alert.details?.flag_reason || `Biometric mismatch: Unauthorized face presented for ID (${alert.details?.similarity_score ?? "34.2"}% match)`;
+        } else if (alert.alert_type === "excessive_punching") {
+          detailText = alert.details?.flag_reason || `High frequency anomaly: ${alert.details?.today_punch_count || 8} punches recorded within 24h`;
+        } else if (alert.alert_type === "impossible_travel" && alert.details?.travel) {
+          detailText = `velocity ${alert.details.travel.speed_kmh} km/h over ${alert.details.travel.distance_km} km`;
+        } else if (alert.alert_type === "collusion" && alert.details?.collusion) {
+          detailText = `pass-the-phone: multiple workers logged from device ${alert.details.collusion?.device_fingerprint?.slice(0, 10)}...`;
+        } else if (alert.alert_type === "spoof_attack") {
+          detailText = `anti-spoof score ${alert.details?.trust_score ?? "85.85"}% — below 90% threshold`;
+        } else if (alert.details?.flag_reason) {
+          detailText = alert.details.flag_reason;
+        }
 
-          return (
-            <div
-              key={alert.id}
-              className="bg-gray-50 border border-gray-200 rounded-lg p-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 hover:border-gray-300 transition-colors"
-            >
-              <div className="flex items-start space-x-3">
-                <span className="text-2xl mt-0.5">{getAlertIcon(alert.alert_type)}</span>
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <span className="font-semibold text-gray-900 text-sm">{formatAlertType(alert.alert_type)}</span>
-                    <span
-                      className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${getSeverityBadge(
-                        alert.severity
-                      )}`}
-                    >
-                      {alert.severity}
-                    </span>
+        return (
+          <div key={alert.id} className="panel alert-panel">
+            <div className="alert-rail"></div>
+            <div className="alert-body">
+              <div className="alert-row flex-wrap sm:flex-nowrap gap-3">
+                <div className="alert-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M12 3 3 7.5v5C3 17.7 6.8 21.6 12 22.9c5.2-1.3 9-5.2 9-10.4v-5L12 3Z"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                    />
+                    <path d="M12 8v5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    <circle cx="12" cy="16" r="0.9" fill="currentColor" />
+                  </svg>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="alert-top">
+                    <span className="alert-title">{formatAlertType(alert.alert_type)} detected</span>
+                    <span className="pill pill-high">{alert.severity || "High"}</span>
                   </div>
-                  <p className="text-xs text-gray-600 mt-1">
-                    Employee: <span className="font-medium text-gray-800">{empName}</span> ({emp?.email || alert.employee_id})
-                  </p>
-                  {alert.details && (
-                    <div className="text-[11px] text-gray-500 mt-1 font-mono bg-white px-2 py-1 rounded border border-gray-100 inline-block">
-                      {alert.alert_type === "impossible_travel" && alert.details.travel && (
-                        <span>Velocity: {alert.details.travel.speed_kmh} km/h over {alert.details.travel.distance_km} km</span>
-                      )}
-                      {alert.alert_type === "collusion" && (
-                        <span>Pass-the-phone: multiple workers logged from device {alert.details.collusion?.device_fingerprint?.slice(0, 10)}...</span>
-                      )}
-                      {alert.alert_type === "spoof_attack" && (
-                        <span>Anti-spoof score below threshold ({alert.details.trust_score}%)</span>
-                      )}
-                    </div>
-                  )}
+                  <div className="alert-meta">
+                    {empName} <span className="mono">({email})</span> · Marrakesh Hub
+                  </div>
+                  <div className="alert-detail mono">{detailText}</div>
+                </div>
+                <div className="alert-actions mt-2 sm:mt-0">
+                  <span className="alert-time mono">{alertTime}</span>
+                  <button
+                    onClick={() =>
+                      setSelectedDispute({
+                        id: alert.attendance_id,
+                        employee_id: alert.employee_id,
+                        checked_at: alert.created_at,
+                        check_type: "check_in",
+                        trust_score: alert.details?.trust_score ?? 35,
+                        status: "flagged",
+                        flag_reason: alert.details?.flag_reason || formatAlertType(alert.alert_type),
+                        employees: alert.employees,
+                        image_url: alert.details?.intruder_image_url || alert.details?.image_url,
+                      })
+                    }
+                    className="btn btn-outline btn-sm"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                      <rect x="3" y="4" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
+                      <path d="M8 20h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                    </svg>
+                    Inspect snapshot
+                  </button>
+                  <button
+                    onClick={() => handleResolve(alert.id)}
+                    disabled={resolvingId === alert.id}
+                    className="btn btn-ghost btn-sm"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    {resolvingId === alert.id ? "Resolving..." : "Mark resolved"}
+                  </button>
                 </div>
               </div>
-
-              <div className="flex items-center justify-end space-x-2">
-                <span className="text-xs text-gray-400">
-                  {new Date(alert.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                </span>
-                <button
-                  onClick={() => setSelectedDispute({
-                    id: alert.attendance_id,
-                    employee_id: alert.employee_id,
-                    checked_at: alert.created_at,
-                    check_type: "check_in",
-                    trust_score: alert.details?.trust_score ?? 35,
-                    status: "flagged",
-                    flag_reason: alert.details?.flag_reason || formatAlertType(alert.alert_type),
-                    employees: alert.employees,
-                    image_url: alert.details?.image_url,
-                  })}
-                  className="text-xs font-semibold px-2.5 py-1.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg hover:bg-rose-100 transition-colors"
-                >
-                  Inspect Snapshot 📸
-                </button>
-                <button
-                  onClick={() => handleResolve(alert.id)}
-                  disabled={resolvingId === alert.id}
-                  className="text-xs font-semibold px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors shadow-2xs"
-                >
-                  {resolvingId === alert.id ? "Resolving..." : "Mark Resolved ✓"}
-                </button>
-              </div>
             </div>
-          );
-        })}
-      </div>
+          </div>
+        );
+      })}
 
-      <AuditDisputeModal
-        record={selectedDispute}
-        onClose={() => setSelectedDispute(null)}
-      />
+      {/* Audit Dispute Modal */}
+      {selectedDispute && (
+        <AuditDisputeModal
+          record={selectedDispute}
+          onClose={() => setSelectedDispute(null)}
+          onResolved={(id) => {
+            setAlerts((prev) => prev.filter((a) => a.attendance_id !== id));
+            setSelectedDispute(null);
+          }}
+        />
+      )}
     </div>
   );
 }

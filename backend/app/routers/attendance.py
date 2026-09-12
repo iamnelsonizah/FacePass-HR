@@ -123,7 +123,6 @@ async def check_in(
             )
 
         # Step 3: 1:1 Biometric Verification against authenticated employee
-        # Get the current user's employee record
         employee = current_user.get("employee")
         if not employee:
             raise HTTPException(
@@ -131,10 +130,47 @@ async def check_in(
                 detail="Employee profile not found",
             )
 
-        # Fetch embeddings specifically for this employee
+        # Anti-Passback & Duplicate Punch Interception (Hysteresis Buffer)
+        last_log_res = (
+            supabase.table("attendance_logs")
+            .select("id, check_type, checked_at")
+            .eq("employee_id", employee["id"])
+            .order("checked_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if last_log_res.data and len(last_log_res.data) > 0:
+            last_log = last_log_res.data[0]
+            if last_log.get("check_type") == "check_in":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Duplicate punch blocked: You are already clocked in. Select Clock Out to record departure.",
+                )
+
+            # Minimum punch interval buffer (180 seconds / 3 minutes)
+            try:
+                last_time = datetime.fromisoformat(last_log["checked_at"].replace("Z", "+00:00"))
+                now_utc = datetime.now(timezone.utc)
+                elapsed_sec = (now_utc - last_time).total_seconds()
+                MIN_PUNCH_INTERVAL_SEC = 180
+                if elapsed_sec < MIN_PUNCH_INTERVAL_SEC:
+                    rem_sec = int(MIN_PUNCH_INTERVAL_SEC - elapsed_sec)
+                    rem_m = rem_sec // 60
+                    rem_s = rem_sec % 60
+                    wait_str = f"{rem_m}m {rem_s}s" if rem_m > 0 else f"{rem_s}s"
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail=f"Anti-Passback Buffer Active: Consecutive punches must be at least 3 minutes apart to prevent rapid punching abuse. Please wait {wait_str} before clocking in.",
+                    )
+            except HTTPException:
+                raise
+            except Exception as parse_err:
+                logger.warning("Could not check anti-passback interval: %s", parse_err)
+
+        # Fetch embeddings specifically for this employee (including adaptive drift templates)
         user_embeddings = (
             supabase.table("embeddings")
-            .select("id, employee_id, embedding")
+            .select("id, employee_id, embedding, is_drift_template")
             .eq("employee_id", employee["id"])
             .eq("is_active", True)
             .execute()
@@ -146,18 +182,56 @@ async def check_in(
                 detail="No face embeddings found. Please complete face enrollment first.",
             )
 
-        # Match face against employee's enrolled templates
-        match_result = face_service.find_best_match(
-            target_embedding, user_embeddings.data, threshold=0.6
-        )
+        # Match face against employee's enrolled multi-template cluster
+        best_similarity = 0.0
+        for emb_item in user_embeddings.data:
+            try:
+                cand_vec = np.array(emb_item["embedding"], dtype=np.float32)
+                sim = float(face_service.compare_embeddings(target_embedding, cand_vec))
+                if sim > best_similarity:
+                    best_similarity = sim
+            except Exception:
+                pass
 
-        if match_result is None:
+        # Anti-Impersonation Protection: If face similarity < 0.60, log intruder snapshot
+        if best_similarity < 0.60:
+            intruder_img_url = upload_attendance_snapshot(image_bytes, str(uuid4()))
+            emp_code = employee.get("employee_code", "UNKNOWN")
+            emp_full_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() or "Employee"
+
+            fraud_detector.record_fraud_alert(
+                supabase_client=supabase,
+                company_id=employee["company_id"],
+                employee_id=employee["id"],
+                attendance_id=None,
+                alert_type="identity_impersonation",
+                severity="critical",
+                risk_score=98.0,
+                details={
+                    "employee_code": emp_code,
+                    "employee_name": emp_full_name,
+                    "similarity_score": round(best_similarity * 100, 1),
+                    "intruder_image_url": intruder_img_url,
+                    "image_url": intruder_img_url,
+                    "device_fingerprint": device_fingerprint,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "flag_reason": f"Biometric Impersonation: Unrecognized face presented for account {emp_code} ({round(best_similarity * 100, 1)}% match vs 60.0% threshold)",
+                },
+            )
+            logger.warning(
+                "Biometric Impersonation Attempt detected for employee %s (%s). Resemblance: %.1f%%",
+                employee["id"],
+                emp_code,
+                best_similarity * 100,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Face not recognized. Please face the camera clearly and try again.",
+                detail=f"Biometric Identity Mismatch: Face presented does not match registered profile for {emp_full_name} ({round(best_similarity * 100, 1)}% resemblance). Impersonation attempt logged with photo proof for HR audit.",
             )
 
-        matched_employee_id, face_confidence = match_result
+        matched_employee_id = employee["id"]
+        face_confidence = best_similarity
 
         # Step 4: Validate geofence
         sites = (
@@ -219,6 +293,23 @@ async def check_in(
                 flag_reasons.append("Low face match confidence")
             if not geofence_valid:
                 flag_reasons.append("Outside geofence")
+
+        # Check daily punch frequency to flag excessive punch anomalies (> 6 punches/day)
+        try:
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            daily_punches_res = (
+                supabase.table("attendance_logs")
+                .select("id", count="exact")
+                .eq("employee_id", matched_employee_id)
+                .gte("checked_at", today_start)
+                .execute()
+            )
+            today_punch_count = daily_punches_res.count if daily_punches_res.count is not None else len(daily_punches_res.data or [])
+            if today_punch_count >= 6:
+                attendance_status = "flagged"
+                flag_reasons.append(f"Excessive daily punch anomaly ({today_punch_count + 1} punches logged today)")
+        except Exception as cnt_err:
+            logger.warning("Could not compute daily punch frequency: %s", cnt_err)
 
         flag_reason = "; ".join(flag_reasons) if flag_reasons else None
 
@@ -389,10 +480,47 @@ async def check_out(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
 
-        # Get employee's own embeddings for verification
+        # Anti-Passback & Duplicate Punch Interception (Hysteresis Buffer)
+        last_log_res = (
+            supabase.table("attendance_logs")
+            .select("id, check_type, checked_at")
+            .eq("employee_id", employee["id"])
+            .order("checked_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if last_log_res.data and len(last_log_res.data) > 0:
+            last_log = last_log_res.data[0]
+            if last_log.get("check_type") == "check_out":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Duplicate punch blocked: You are already clocked out. Select Clock In to start a new shift.",
+                )
+
+            # Minimum punch interval buffer (180 seconds / 3 minutes)
+            try:
+                last_time = datetime.fromisoformat(last_log["checked_at"].replace("Z", "+00:00"))
+                now_utc = datetime.now(timezone.utc)
+                elapsed_sec = (now_utc - last_time).total_seconds()
+                MIN_PUNCH_INTERVAL_SEC = 180
+                if elapsed_sec < MIN_PUNCH_INTERVAL_SEC:
+                    rem_sec = int(MIN_PUNCH_INTERVAL_SEC - elapsed_sec)
+                    rem_m = rem_sec // 60
+                    rem_s = rem_sec % 60
+                    wait_str = f"{rem_m}m {rem_s}s" if rem_m > 0 else f"{rem_s}s"
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail=f"Anti-Passback Buffer Active: Consecutive punches must be at least 3 minutes apart to prevent rapid punching abuse. Please wait {wait_str} before clocking out.",
+                    )
+            except HTTPException:
+                raise
+            except Exception as parse_err:
+                logger.warning("Could not check anti-passback interval: %s", parse_err)
+
+        # Get employee's own embeddings for verification (including adaptive drift templates)
         embeddings = (
             supabase.table("embeddings")
-            .select("id, employee_id, embedding")
+            .select("id, employee_id, embedding, is_drift_template")
             .eq("employee_id", employee["id"])
             .eq("is_active", True)
             .execute()
@@ -405,17 +533,53 @@ async def check_out(
             )
 
         # Verification 1: Master Biometric Identity Match (against enrolled templates)
-        match_result = face_service.find_best_match(
-            target_embedding, embeddings.data, threshold=0.6
-        )
+        best_similarity = 0.0
+        for emb_item in embeddings.data:
+            try:
+                cand_vec = np.array(emb_item["embedding"], dtype=np.float32)
+                sim = float(face_service.compare_embeddings(target_embedding, cand_vec))
+                if sim > best_similarity:
+                    best_similarity = sim
+            except Exception:
+                pass
 
-        if match_result is None:
+        if best_similarity < 0.60:
+            intruder_img_url = upload_attendance_snapshot(image_bytes, str(uuid4()))
+            emp_code = employee.get("employee_code", "UNKNOWN")
+            emp_full_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() or "Employee"
+
+            fraud_detector.record_fraud_alert(
+                supabase_client=supabase,
+                company_id=employee["company_id"],
+                employee_id=employee["id"],
+                attendance_id=None,
+                alert_type="identity_impersonation",
+                severity="critical",
+                risk_score=98.0,
+                details={
+                    "employee_code": emp_code,
+                    "employee_name": emp_full_name,
+                    "similarity_score": round(best_similarity * 100, 1),
+                    "intruder_image_url": intruder_img_url,
+                    "image_url": intruder_img_url,
+                    "device_fingerprint": device_fingerprint,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "flag_reason": f"Biometric Impersonation: Unrecognized face presented for checkout on account {emp_code} ({round(best_similarity * 100, 1)}% match vs 60.0% threshold)",
+                },
+            )
+            logger.warning(
+                "Biometric Impersonation Attempt on check-out for employee %s (%s). Resemblance: %.1f%%",
+                employee["id"],
+                emp_code,
+                best_similarity * 100,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Face not recognized against enrolled profile. Please ensure proper lighting and face the camera.",
+                detail=f"Biometric Identity Mismatch: Face presented does not match registered profile for {emp_full_name} ({round(best_similarity * 100, 1)}% resemblance). Impersonation attempt logged with photo proof for HR audit.",
             )
 
-        _, master_confidence = match_result
+        master_confidence = best_similarity
         master_resemblance_pct = round(master_confidence * 100, 1)
 
         # Verification 2: ML Session Continuity Triangulation (Compare against today's check-in face)
@@ -536,6 +700,17 @@ async def check_out(
                 )
             except Exception as alert_err:
                 logger.warning("Could not record buddy punching fraud alert: %s", alert_err)
+
+        # Step: Continuous learning & biometric drift adaptation
+        if checkout_status == "verified" and target_embedding is not None and master_confidence >= 0.88:
+            template_drift_service.consider_drift_update(
+                supabase_client=supabase,
+                employee_id=employee["id"],
+                new_embedding=target_embedding,
+                match_confidence=master_confidence,
+                spoof_score=0.95,
+                geofence_valid=True,
+            )
 
         return {
             "message": (

@@ -41,9 +41,9 @@ export default function LoginForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+        <div className="bg-[#AE3B26]/10 border border-[#AE3B26]/30 text-[#AE3B26] px-3 py-2 rounded-[3px] text-xs">
           {error}
         </div>
       )}
@@ -51,7 +51,7 @@ export default function LoginForm() {
       <div>
         <label
           htmlFor="email"
-          className="block text-sm font-medium text-gray-700 mb-1.5"
+          className="block text-[11px] uppercase tracking-wider font-semibold text-[var(--muted,#6E7175)] mb-1"
         >
           Email address
         </label>
@@ -60,16 +60,16 @@ export default function LoginForm() {
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="admin@company.com"
+          placeholder="admin@facepass.com"
           required
-          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors text-gray-900 placeholder-gray-400"
+          className="w-full px-3 py-2 bg-white border border-[var(--line,#E4E2DC)] rounded-[3px] text-xs font-mono text-[var(--ink,#14171C)] focus:outline-none focus:border-[var(--ink,#14171C)]"
         />
       </div>
 
       <div>
         <label
           htmlFor="password"
-          className="block text-sm font-medium text-gray-700 mb-1.5"
+          className="block text-[11px] uppercase tracking-wider font-semibold text-[var(--muted,#6E7175)] mb-1"
         >
           Password
         </label>
@@ -80,16 +80,16 @@ export default function LoginForm() {
           onChange={(e) => setPassword(e.target.value)}
           placeholder="••••••••"
           required
-          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors text-gray-900 placeholder-gray-400"
+          className="w-full px-3 py-2 bg-white border border-[var(--line,#E4E2DC)] rounded-[3px] text-xs font-mono text-[var(--ink,#14171C)] focus:outline-none focus:border-[var(--ink,#14171C)]"
         />
       </div>
 
       <button
         type="submit"
         disabled={loading}
-        className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-lg transition-colors"
+        className="btn btn-dark w-full py-2 text-xs font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
       >
-        {loading ? "Signing in..." : "Sign In"}
+        {loading ? "Authenticating..." : "Sign In to Operations"}
       </button>
     </form>
   );

@@ -364,285 +364,254 @@ export default function TimesheetSection({ logs }: TimesheetSectionProps) {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-      {/* Header */}
-      <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-slate-50/70 to-blue-50/30">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xl">⏱️</span>
-            <h3 className="text-lg font-bold text-gray-900">
-              Automated Timesheets & Payroll Hours
-            </h3>
-            <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
-              Real-Time Engine
-            </span>
+    <div id="timesheets" className="panel">
+      {/* Panel Head */}
+      <div className="panel-head">
+        <div className="panel-title">
+          <div>
+            <h2>Automated timesheets &amp; payroll hours</h2>
+            <p>Paired morning punch-ins, evening check-outs, shift durations and overtime</p>
           </div>
-          <p className="text-xs text-gray-500 mt-1">
-            Paired morning punch-ins, evening check-outs, shift durations, overtime, and punctuality
-          </p>
+        </div>
+        <div className="tabs">
+          <button
+            className={viewMode === "shifts" ? "active" : ""}
+            onClick={() => setViewMode("shifts")}
+          >
+            Daily shifts
+          </button>
+          <button
+            className={viewMode === "payroll" ? "active" : ""}
+            onClick={() => setViewMode("payroll")}
+          >
+            Payroll summary
+          </button>
+        </div>
+      </div>
+
+      {/* Stat Row */}
+      <div className="stat-row flex-wrap sm:flex-nowrap">
+        <div className="stat-block">
+          <div className="stat-block-label">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M12 7.5V12l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            Total hours worked
+          </div>
+          <div className="stat-block-value">
+            {metrics.total_hours} <small>hrs</small>
+          </div>
         </div>
 
-        {/* View Toggle & Export Actions */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div className="inline-flex rounded-lg bg-gray-100 p-0.5 border border-gray-200 text-xs">
-            <button
-              onClick={() => setViewMode("shifts")}
-              className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
-                viewMode === "shifts"
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              📅 Daily Shifts
-            </button>
-            <button
-              onClick={() => setViewMode("payroll")}
-              className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
-                viewMode === "payroll"
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              💼 Payroll Summary
-            </button>
+        <div className="stat-block">
+          <div className="stat-block-label">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.6" />
+              <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+            </svg>
+            On-time punctuality
           </div>
+          <div
+            className="stat-block-value"
+            style={{ color: metrics.on_time_rate >= 80 ? "var(--teal)" : "var(--amber)" }}
+          >
+            {metrics.on_time_rate}%
+          </div>
+        </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => downloadCSV("detailed")}
-              disabled={downloading !== null}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50"
-              title="Export paired daily shift records to CSV"
-            >
-              <span>{downloading === "detailed" ? "Exporting..." : "📥 Shifts CSV"}</span>
-            </button>
-            <button
-              onClick={() => downloadCSV("payroll")}
-              disabled={downloading !== null}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50"
-              title="Export aggregated employee payroll report to CSV"
-            >
-              <span>{downloading === "payroll" ? "Exporting..." : "💼 Payroll CSV"}</span>
-            </button>
-            <button
-              onClick={() => setIsDigestModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
-              title="Generate and email executive attendance digest to HR/Management"
-            >
-              <span>📧 Send HR Digest</span>
-            </button>
+        <div className="stat-block">
+          <div className="stat-block-label">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+            </svg>
+            Overtime logged
+          </div>
+          <div className="stat-block-value">
+            {metrics.total_overtime} <small>hrs</small>
+          </div>
+        </div>
+
+        <div className="stat-block">
+          <div className="stat-block-label">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <rect x="3.5" y="4.5" width="17" height="15" rx="1.8" stroke="currentColor" strokeWidth="1.6" />
+            </svg>
+            Average shift length
+          </div>
+          <div className="stat-block-value">
+            {metrics.avg_shift} <small>hrs</small>
           </div>
         </div>
       </div>
 
-      {/* KPI Stats Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-gray-100 border-b border-gray-100 bg-white">
-        <div className="p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-lg">
-            ⏱️
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-              Total Hours Worked
-            </p>
-            <p className="text-xl font-black text-gray-900">
-              {metrics.total_hours} <span className="text-xs font-normal text-gray-500">hrs</span>
-            </p>
-          </div>
-        </div>
-
-        <div className="p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-lg">
-            🎯
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-              On-Time Punctuality
-            </p>
-            <p className="text-xl font-black text-emerald-600">
-              {metrics.on_time_rate}%
-            </p>
-          </div>
-        </div>
-
-        <div className="p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-lg">
-            ⚡
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-              Overtime Logged
-            </p>
-            <p className="text-xl font-black text-amber-600">
-              {metrics.total_overtime} <span className="text-xs font-normal text-gray-500">hrs</span>
-            </p>
-          </div>
-        </div>
-
-        <div className="p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
-            🏢
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-              Average Shift Length
-            </p>
-            <p className="text-xl font-black text-indigo-600">
-              {metrics.avg_shift} <span className="text-xs font-normal text-gray-500">hrs</span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Filter and Search Controls */}
-      <div className="p-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3 bg-gray-50/50">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-gray-500">Range:</span>
+      {/* Toolbar */}
+      <div className="toolbar">
+        <div className="tabs">
           {(["all", "today", "week", "month"] as const).map((mode) => (
             <button
               key={mode}
               onClick={() => setDateFilter(mode)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium capitalize transition-colors ${
-                dateFilter === mode
-                  ? "bg-gray-900 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
-              }`}
+              className={dateFilter === mode ? "active capitalize" : "capitalize"}
             >
               {mode}
             </button>
           ))}
         </div>
 
-        <div className="w-full sm:w-64">
-          <input
-            type="text"
-            placeholder="Search employee or code..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full px-3 py-1.5 text-xs bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-          />
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="search" style={{ width: "200px" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M20 20l-4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            <input
+              placeholder="Employee or code…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+
+          <div className="btn-group">
+            <button
+              onClick={() => downloadCSV("detailed")}
+              disabled={downloading !== null}
+              className="btn btn-outline btn-sm"
+              title="Download Paired Daily Shifts CSV"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 4v11m0 0-4-4m4 4 4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Shifts CSV
+            </button>
+
+            <button
+              onClick={() => downloadCSV("payroll")}
+              disabled={downloading !== null}
+              className="btn btn-outline btn-sm"
+              title="Download Payroll Summary CSV"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 4v11m0 0-4-4m4 4 4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Payroll CSV
+            </button>
+
+            <button
+              onClick={() => setIsDigestModalOpen(true)}
+              className="btn btn-dark btn-sm"
+              title="Generate and Send HR Attendance Digest"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <path d="M4 6h16v12H4z" stroke="#fff" strokeWidth="1.5" />
+                <path d="M4 7l8 6 8-6" stroke="#fff" strokeWidth="1.5" />
+              </svg>
+              Send HR digest
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* View 1: Paired Daily Shifts Table */}
+      {/* View 1: Daily Shifts Table */}
       {viewMode === "shifts" ? (
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table>
             <thead>
-              <tr className="border-b border-gray-100 bg-gray-50/70 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-                <th className="px-6 py-3">Employee</th>
-                <th className="px-6 py-3">Date</th>
-                <th className="px-6 py-3">Check-In</th>
-                <th className="px-6 py-3">Check-Out</th>
-                <th className="px-6 py-3">Shift Duration</th>
-                <th className="px-6 py-3">Overtime</th>
-                <th className="px-6 py-3">Punctuality</th>
-                <th className="px-6 py-3 text-right">Status</th>
+              <tr>
+                <th>Employee</th>
+                <th>Date</th>
+                <th>Check-in</th>
+                <th>Check-out</th>
+                <th>Duration</th>
+                <th>Overtime</th>
+                <th>Punctuality</th>
+                <th>Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50 text-xs">
+            <tbody>
               {filteredShifts.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-gray-400">
-                    No shift records found for this period.
+                  <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--text-faint)" }}>
+                    No shift activity recorded for this period.
                   </td>
                 </tr>
               ) : (
                 filteredShifts.map((shift) => (
-                  <tr key={shift.id} className="hover:bg-gray-50/70 transition-colors">
-                    {/* Employee */}
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col">
-                        <span className="font-bold text-gray-900">{shift.employee_name}</span>
-                        <span className="text-[11px] font-mono text-gray-400">
-                          {shift.employee_code}
-                        </span>
-                      </div>
+                  <tr key={shift.id}>
+                    <td>
+                      <div className="cell-name">{shift.employee_name}</div>
+                      <div className="cell-sub">{shift.employee_code || "—"}</div>
                     </td>
-
-                    {/* Date */}
-                    <td className="px-6 py-4 font-mono text-gray-600">{shift.date}</td>
-
-                    {/* Check In */}
-                    <td className="px-6 py-4">
-                      {shift.check_in_time ? (
-                        <div className="flex items-center gap-1.5 font-medium text-emerald-700">
-                          <span>🌅</span>
-                          <span>
-                            {new Date(shift.check_in_time).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-gray-400 italic">None</span>
-                      )}
+                    <td className="mono" style={{ color: "var(--text-mute)" }}>
+                      {shift.date}
                     </td>
-
-                    {/* Check Out */}
-                    <td className="px-6 py-4">
-                      {shift.check_out_time ? (
-                        <div className="flex items-center gap-1.5 font-medium text-blue-700">
-                          <span>🌇</span>
-                          <span>
-                            {new Date(shift.check_out_time).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-gray-400 italic">In progress...</span>
-                      )}
+                    <td className="mono">
+                      {shift.check_in_time
+                        ? new Date(shift.check_in_time).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "—"}
                     </td>
-
-                    {/* Duration */}
-                    <td className="px-6 py-4">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-800">
-                        ⏱️ {shift.formatted_duration}
+                    <td className="mono">
+                      {shift.check_out_time
+                        ? new Date(shift.check_out_time).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "In progress"}
+                    </td>
+                    <td className="mono">{shift.formatted_duration}</td>
+                    <td className="mono" style={{ color: shift.overtime_hours > 0 ? "var(--amber)" : "var(--text-faint)" }}>
+                      {shift.overtime_hours > 0 ? `+${shift.overtime_hours}h` : "—"}
+                    </td>
+                    <td>
+                      <span
+                        className={`pill ${
+                          shift.arrival_status === "on_time" ? "pill-verified" : "pill-flagged"
+                        }`}
+                      >
+                        {shift.arrival_status === "on_time"
+                          ? "On time"
+                          : `Late +${shift.minutes_late}m`}
                       </span>
                     </td>
-
-                    {/* Overtime */}
-                    <td className="px-6 py-4">
-                      {shift.overtime_hours > 0 ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800">
-                          +{shift.overtime_hours}h OT
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
-                    </td>
-
-                    {/* Punctuality */}
-                    <td className="px-6 py-4">
-                      {shift.arrival_status === "on_time" ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                          ✓ On Time
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                          Late (+{shift.minutes_late}m)
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Status */}
-                    <td className="px-6 py-4 text-right">
-                      {shift.shift_status === "completed" ? (
-                        <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
-                          Completed
-                        </span>
-                      ) : shift.shift_status === "in_progress" ? (
-                        <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 text-blue-800 animate-pulse">
-                          Active On-Site
-                        </span>
-                      ) : (
-                        <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-800">
-                          Missing Punch
-                        </span>
-                      )}
+                    <td>
+                      <span
+                        className="pill"
+                        style={{
+                          background:
+                            shift.shift_status === "completed"
+                              ? "#EFEEE9"
+                              : shift.shift_status === "in_progress"
+                              ? "var(--teal-soft)"
+                              : "var(--red-soft)",
+                          color:
+                            shift.shift_status === "completed"
+                              ? "var(--text-mute)"
+                              : shift.shift_status === "in_progress"
+                              ? "var(--teal)"
+                              : "var(--red)",
+                        }}
+                      >
+                        {shift.shift_status === "completed"
+                          ? "Completed"
+                          : shift.shift_status === "in_progress"
+                          ? "Active"
+                          : "Missing Punch"}
+                      </span>
                     </td>
                   </tr>
                 ))
@@ -653,71 +622,49 @@ export default function TimesheetSection({ logs }: TimesheetSectionProps) {
       ) : (
         /* View 2: Payroll Summary Table */
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table>
             <thead>
-              <tr className="border-b border-gray-100 bg-gray-50/70 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-                <th className="px-6 py-3">Employee</th>
-                <th className="px-6 py-3">Email</th>
-                <th className="px-6 py-3">Days Worked</th>
-                <th className="px-6 py-3">Regular Hours</th>
-                <th className="px-6 py-3">Overtime Hours</th>
-                <th className="px-6 py-3">Total Payable Hours</th>
-                <th className="px-6 py-3 text-right">Punctuality Score</th>
+              <tr>
+                <th>Employee</th>
+                <th>Days worked</th>
+                <th>Completed shifts</th>
+                <th>Regular hours</th>
+                <th>Overtime</th>
+                <th>Total payable</th>
+                <th>Punctuality</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50 text-xs">
+            <tbody>
               {filteredPayroll.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-gray-400">
-                    No payroll summaries found.
+                  <td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "var(--text-faint)" }}>
+                    No payroll records found.
                   </td>
                 </tr>
               ) : (
                 filteredPayroll.map((pay) => (
-                  <tr key={pay.employee_id} className="hover:bg-gray-50/70 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col">
-                        <span className="font-bold text-gray-900">{pay.employee_name}</span>
-                        <span className="text-[11px] font-mono text-gray-400">
-                          {pay.employee_code}
-                        </span>
-                      </div>
+                  <tr key={pay.employee_id}>
+                    <td>
+                      <div className="cell-name">{pay.employee_name}</div>
+                      <div className="cell-sub">{pay.employee_code || "—"}</div>
                     </td>
-
-                    <td className="px-6 py-4 text-gray-600 font-mono">{pay.email}</td>
-
-                    <td className="px-6 py-4 font-semibold text-gray-800">
-                      {pay.days_worked} <span className="text-gray-400 font-normal">days</span>
+                    <td className="mono">{pay.days_worked}</td>
+                    <td className="mono">{pay.completed_shifts}</td>
+                    <td className="mono">{pay.total_regular_hours}h</td>
+                    <td className="mono" style={{ color: pay.total_overtime_hours > 0 ? "var(--amber)" : "var(--text-faint)" }}>
+                      {pay.total_overtime_hours > 0 ? `+${pay.total_overtime_hours}h` : "0.0h"}
                     </td>
-
-                    <td className="px-6 py-4 font-mono font-medium text-gray-700">
-                      {pay.total_regular_hours}h
+                    <td className="mono" style={{ fontWeight: 700, color: "var(--text)" }}>
+                      {pay.total_hours} hrs
                     </td>
-
-                    <td className="px-6 py-4">
-                      {pay.total_overtime_hours > 0 ? (
-                        <span className="font-mono font-bold text-amber-600">
-                          +{pay.total_overtime_hours}h
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">0.0h</span>
-                      )}
-                    </td>
-
-                    <td className="px-6 py-4">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-black bg-blue-50 text-blue-700 border border-blue-200">
-                        {pay.total_hours} hrs
-                      </span>
-                    </td>
-
-                    <td className="px-6 py-4 text-right">
+                    <td>
                       <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                        className={`pill ${
                           pay.punctuality_pct >= 90
-                            ? "bg-emerald-100 text-emerald-800"
+                            ? "pill-verified"
                             : pay.punctuality_pct >= 70
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-rose-100 text-rose-800"
+                            ? "pill-moderate"
+                            : "pill-flagged"
                         }`}
                       >
                         {pay.punctuality_pct}%
@@ -731,6 +678,7 @@ export default function TimesheetSection({ logs }: TimesheetSectionProps) {
         </div>
       )}
 
+      {/* HR Digest Modal */}
       <SendDigestModal
         isOpen={isDigestModalOpen}
         onClose={() => setIsDigestModalOpen(false)}

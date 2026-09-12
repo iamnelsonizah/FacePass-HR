@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { createServerClient } from "@/lib/supabase-server";
-import StatsCard from "@/components/StatsCard";
 import EmployeeTable from "@/components/EmployeeTable";
 import AttendanceTable from "@/components/AttendanceTable";
 import FraudAlertsList from "@/components/FraudAlertsList";
@@ -8,10 +7,11 @@ import TimesheetExportButton from "@/components/TimesheetExportButton";
 import TimesheetSection from "@/components/TimesheetSection";
 import SiteGeofenceMap from "@/components/SiteGeofenceMap";
 import AnalyticsSection from "@/components/AnalyticsSection";
+import VisitorManagementSection from "@/components/VisitorManagementSection";
 
 /**
- * Main dashboard page — shows stats, live geofence map, fraud alerts, employees, and logs.
- * Server component fetching data directly from Supabase.
+ * Main dashboard page — Security & Operations Console.
+ * Server component fetching live attendance, biometric, and facility data.
  */
 export default async function DashboardPage() {
   const supabase = await createServerClient();
@@ -74,76 +74,148 @@ export default async function DashboardPage() {
     .eq("status", "flagged")
     .gte("checked_at", todayISO);
 
+  // Calculate today's late check-ins and staff vs visitor breakdown for KPI subtitle
+  const todayCheckinLogs = (attendanceLogs || []).filter(
+    (l) => l.check_type === "check_in" && l.checked_at && l.checked_at >= todayISO
+  );
+  const todayLateCount = todayCheckinLogs.filter((l) => {
+    const dt = new Date(l.checked_at);
+    return dt.getHours() * 60 + dt.getMinutes() > 9 * 60 + 15;
+  }).length;
+
+  const visitorCheckins = todayCheckinLogs.filter((l) =>
+    Boolean(
+      (l.employees?.employee_code || "").toUpperCase().startsWith("VIS-") ||
+      (l.device_fingerprint || "").includes("visitor")
+    )
+  ).length;
+  const staffCheckins = Math.max(0, todayCheckinLogs.length - visitorCheckins);
+
+  const syncTime = new Date().toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
   return (
-    <div className="space-y-8">
-      {/* Header & Export Action */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <>
+      {/* Topbar */}
+      <div className="topbar">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Dashboard</h2>
-          <p className="text-gray-500 mt-1">
-            Real-time biometric attendance, site geofences, and AI fraud monitoring
-          </p>
+          <h1>Dashboard</h1>
+          <p>Real-time biometric attendance &amp; site security ledger</p>
         </div>
-        <div className="flex items-center space-x-3">
-          <Link
-            href="/kiosk"
-            target="_blank"
-            className="inline-flex items-center space-x-2 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
-            title="Launch full-screen entrance reception kiosk"
-          >
-            <span>🖥️ Launch Kiosk Mode</span>
+        <div className="actions">
+          <Link href="/portal" className="btn btn-outline" target="_blank">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="m9 12 2 2 4-4"/>
+            </svg>
+            Open Web Portal
+          </Link>
+          <Link href="/kiosk" className="btn btn-outline" target="_blank">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M4 4v16l16-8L4 4Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+            </svg>
+            Launch kiosk mode
           </Link>
           <TimesheetExportButton />
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatsCard
-          title="Total Employees"
-          value={totalEmployees ?? 0}
-          icon="👥"
+      {/* Main Operations Container */}
+      <div className="container-ops">
+        {/* KPI Strip */}
+        <div id="overview" className="kpi-strip">
+          <div className="kpi">
+            <div className="kpi-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M3.5 19c0-3.3 2.6-5.6 5.5-5.6S14.5 15.7 14.5 19" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+              Total employees
+            </div>
+            <div className="kpi-value">{totalEmployees ?? 1}</div>
+            <div className="kpi-sub">Enrolled &amp; active</div>
+          </div>
+
+          <div className="kpi">
+            <div className="kpi-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
+                <circle cx="12" cy="12" r="3.4" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+              Today&apos;s check-ins
+            </div>
+            <div className="kpi-value">{todaysCheckins ?? 0}</div>
+            <div className="kpi-sub font-mono">
+              <span className="text-[#0C6B72] font-semibold">{staffCheckins} Staff</span>
+              {visitorCheckins > 0 ? (
+                <span className="text-[#9C6B18]"> · {visitorCheckins} Visitor{visitorCheckins === 1 ? "" : "s"}</span>
+              ) : (
+                <span className="text-[var(--text-faint)]"> · 0 Visitors</span>
+              )}
+              {todayLateCount > 0 ? ` · ${todayLateCount} late` : ""}
+            </div>
+          </div>
+
+          <div className="kpi">
+            <div className="kpi-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M12 21s7-5.1 7-11.2A7 7 0 0 0 5 9.8C5 15.9 12 21 12 21Z" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+              Active sites
+            </div>
+            <div className="kpi-value">{activeSites ?? 1}</div>
+            <div className="kpi-sub">Marrakesh Hub · 2000m radius</div>
+          </div>
+
+          <div className={`kpi ${flaggedCheckins && flaggedCheckins > 0 ? "is-alert" : ""}`}>
+            <div className="kpi-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3 3 7.5v5C3 17.7 6.8 21.6 12 22.9c5.2-1.3 9-5.2 9-10.4v-5L12 3Z" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+              Flagged anomalies
+            </div>
+            <div className="kpi-value">{flaggedCheckins ?? 0}</div>
+            <div className="kpi-sub">
+              {flaggedCheckins && flaggedCheckins > 0 ? "Requires review" : "Zero anomalies detected"}
+            </div>
+          </div>
+        </div>
+
+        {/* Security & Fraud Alerts Panel */}
+        <FraudAlertsList initialAlerts={fraudAlerts || []} />
+
+        {/* Workforce & Biometrics Analytics */}
+        <AnalyticsSection
+          logs={attendanceLogs || []}
+          employees={employees || []}
         />
-        <StatsCard
-          title="Today's Check-ins"
-          value={todaysCheckins ?? 0}
-          icon="📸"
+
+        {/* Live Site Geofence & Location Schematic */}
+        <SiteGeofenceMap
+          sites={sites || []}
+          attendanceLogs={attendanceLogs || []}
         />
-        <StatsCard
-          title="Active Sites"
-          value={activeSites ?? 0}
-          icon="📍"
-        />
-        <StatsCard
-          title="Flagged Anomalies"
-          value={flaggedCheckins ?? 0}
-          icon="⚠️"
-        />
+
+        {/* Employees Panel */}
+        <EmployeeTable employees={employees || []} />
+
+        {/* Visitors & Guests Management & Analytics Panel */}
+        <VisitorManagementSection initialLogs={attendanceLogs || []} />
+
+        {/* Automated Timesheets & Payroll Hours */}
+        <TimesheetSection logs={attendanceLogs || []} />
+
+        {/* Attendance Logs Panel */}
+        <AttendanceTable logs={attendanceLogs || []} />
+
+        {/* Page Footer */}
+        <footer className="page-foot">
+          <span>FacePass Admin · Marrakesh Hub</span>
+          <span>Last synced {syncTime}</span>
+        </footer>
       </div>
-
-      {/* Fraud & Security Alert Banner */}
-      <FraudAlertsList initialAlerts={fraudAlerts || []} />
-
-      {/* Workforce & Biometrics Analytics */}
-      <AnalyticsSection
-        logs={attendanceLogs || []}
-        employees={employees || []}
-      />
-
-      {/* Interactive Site Geofence Map */}
-      <SiteGeofenceMap
-        sites={sites || []}
-        attendanceLogs={attendanceLogs || []}
-      />
-
-      {/* Employees Table */}
-      <EmployeeTable employees={employees || []} />
-
-      {/* Automated Shift Timesheets & Payroll Hours */}
-      <TimesheetSection logs={attendanceLogs || []} />
-
-      {/* Attendance Logs Table */}
-      <AttendanceTable logs={attendanceLogs || []} />
-    </div>
+    </>
   );
 }

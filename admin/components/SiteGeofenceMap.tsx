@@ -107,9 +107,9 @@ export default function SiteGeofenceMap({ sites, attendanceLogs }: SiteGeofenceM
 
     if (circle) {
       circle.setStyle({
-        color: "#2563EB",
-        fillColor: "#3B82F6",
-        fillOpacity: 0.28,
+        color: "#0C6B72",
+        fillColor: "#0C6B72",
+        fillOpacity: 0.25,
         weight: 3,
         dashArray: undefined, // solid line during editing
       });
@@ -138,9 +138,9 @@ export default function SiteGeofenceMap({ sites, attendanceLogs }: SiteGeofenceM
       circle.setRadius(editingSite.radius_meters || 150);
       circle.setLatLng([editingSite.latitude, editingSite.longitude]);
       circle.setStyle({
-        color: "#2563EB",
-        fillColor: "#3B82F6",
-        fillOpacity: 0.15,
+        color: "#0C6B72",
+        fillColor: "#0C6B72",
+        fillOpacity: 0.14,
         weight: 2,
         dashArray: "6, 6",
       });
@@ -235,9 +235,9 @@ export default function SiteGeofenceMap({ sites, attendanceLogs }: SiteGeofenceM
         });
         setTimeout(() => {
           circle.setStyle({
-            color: "#2563EB",
-            fillColor: "#3B82F6",
-            fillOpacity: 0.15,
+            color: "#0C6B72",
+            fillColor: "#0C6B72",
+            fillOpacity: 0.14,
           });
         }, 2000);
       }
@@ -290,6 +290,13 @@ export default function SiteGeofenceMap({ sites, attendanceLogs }: SiteGeofenceM
 
       mapInstanceRef.current = map;
 
+      // Invalidate size once container layout stabilizes
+      setTimeout(() => {
+        if (isMounted && mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+        }
+      }, 150);
+
       // Map Click Handler: If editing, relocate site center. Otherwise open Create Site modal.
       map.on("click", (e: any) => {
         if (editingSiteRef.current) {
@@ -322,9 +329,9 @@ export default function SiteGeofenceMap({ sites, attendanceLogs }: SiteGeofenceM
 
         // Geofence perimeter circle
         const circle = L.circle([site.latitude, site.longitude], {
-          color: "#2563EB",
-          fillColor: "#3B82F6",
-          fillOpacity: 0.15,
+          color: "#0C6B72",
+          fillColor: "#0C6B72",
+          fillOpacity: 0.14,
           radius: site.radius_meters || 150,
           weight: 2,
           dashArray: "6, 6",
@@ -336,8 +343,8 @@ export default function SiteGeofenceMap({ sites, attendanceLogs }: SiteGeofenceM
         const siteIcon = L.divIcon({
           className: "custom-site-icon",
           html: `
-            <div style="background-color: #1E40AF; color: white; width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center; justify-content: center; font-size: 17px; border: 2px solid white; box-shadow: 0 4px 8px -1px rgba(0,0,0,0.3); cursor: grab;">
-              🏢
+            <div style="background-color: #14171C; color: white; width: 32px; height: 32px; border-radius: 4px; display: flex; align-items: center; justify-content: center; border: 1px solid #E4E2DC; box-shadow: 0 2px 4px rgba(0,0,0,0.15); cursor: grab;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M9 8h1"/><path d="M9 12h1"/><path d="M9 16h1"/><path d="M14 8h1"/><path d="M14 12h1"/><path d="M14 16h1"/><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/></svg>
             </div>
           `,
           iconSize: [34, 34],
@@ -366,18 +373,18 @@ export default function SiteGeofenceMap({ sites, attendanceLogs }: SiteGeofenceM
           ? `${log.employees.first_name} ${log.employees.last_name}`
           : "Felix Izah";
 
-        // Color code by Trust Score
-        let pinColor = "#16A34A"; // Green (Verified)
+        // Color code by Trust Score with semantic ops colors
+        let pinColor = "#0C6B72"; // Deep Teal (Verified)
         if (log.trust_score < 50) {
-          pinColor = "#DC2626"; // Red (Flagged)
+          pinColor = "#AE3B26"; // Brick Red (Flagged)
         } else if (log.trust_score < 75) {
-          pinColor = "#D97706"; // Amber (Moderate)
+          pinColor = "#9C6B18"; // Amber (Moderate)
         }
 
         const checkIcon = L.divIcon({
           className: "custom-attendance-icon",
           html: `
-            <div style="background-color: ${pinColor}; color: white; width: 28px; height: 28px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; border: 2px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.35);">
+            <div style="background-color: ${pinColor}; color: white; width: 28px; height: 28px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; font-family: monospace; border: 1.5px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.3);">
               ${log.check_type === "check_in" ? "IN" : "OUT"}
             </div>
           `,
@@ -390,24 +397,24 @@ export default function SiteGeofenceMap({ sites, attendanceLogs }: SiteGeofenceM
         const marker = L.marker([log.latitude, log.longitude], { icon: checkIcon })
           .addTo(map)
           .bindPopup(`
-            <div style="font-family: sans-serif; padding: 4px; min-width: 180px;">
+            <div style="font-family: var(--font-archivo, sans-serif); padding: 4px; min-width: 190px;">
               <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-                <img src="${snapshotThumb}" style="width: 38px; height: 38px; border-radius: 6px; object-fit: cover; background: #e2e8f0;" onerror="this.style.display='none'" />
+                <img src="${snapshotThumb}" style="width: 38px; height: 38px; border-radius: 3px; object-fit: cover; background: #e2e8f0; border: 1px solid #E4E2DC;" onerror="this.style.display='none'" />
                 <div>
-                  <strong style="font-size: 13px; color: #111827; display: block;">${empName}</strong>
-                  <span style="font-size: 10px; background: ${pinColor}20; color: ${pinColor}; padding: 1px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase;">
+                  <strong style="font-size: 13px; color: #14171C; display: block;">${empName}</strong>
+                  <span style="font-size: 9.5px; font-family: monospace; background: ${pinColor}20; color: ${pinColor}; padding: 1px 6px; border-radius: 2px; font-weight: 700; text-transform: uppercase;">
                     ${log.check_type.replace("_", " ")}
                   </span>
                 </div>
               </div>
-              <p style="margin: 2px 0 0; font-size: 11px; color: #4B5563;">
-                Trust Score: <strong style="color: ${pinColor};">${log.trust_score}%</strong>
+              <p style="margin: 2px 0 0; font-size: 11px; color: #6E7175;">
+                Trust Score: <strong style="font-family: monospace; color: ${pinColor};">${log.trust_score}%</strong>
               </p>
-              <p style="margin: 2px 0 0; font-size: 10px; color: #6B7280; font-family: monospace;">
-                📍 ${log.latitude.toFixed(4)}, ${log.longitude.toFixed(4)}
+              <p style="margin: 2px 0 0; font-size: 10px; color: #6E7175; font-family: monospace;">
+                GPS: ${log.latitude.toFixed(4)}, ${log.longitude.toFixed(4)}
               </p>
-              <p style="margin: 3px 0 0; font-size: 10px; color: #9CA3AF;">
-                ${new Date(log.checked_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              <p style="margin: 3px 0 0; font-size: 10px; color: #6E7175; font-family: monospace;">
+                Time: ${new Date(log.checked_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </p>
             </div>
           `);
@@ -465,80 +472,103 @@ export default function SiteGeofenceMap({ sites, attendanceLogs }: SiteGeofenceM
     };
   }, [siteList, attendanceLogs]);
 
-  // Find latest user punch for quick jump button
-  const latestPunch = attendanceLogs.find((l) => l.latitude && l.longitude);
+
+  // Primary active site
+  const activeSite = siteList[0] || {
+    id: "default",
+    name: "Marrakesh Hub",
+    latitude: 31.6393467,
+    longitude: -8.0095983,
+    radius_meters: 2000,
+  };
+
+  // Latest attendance punch for live telemetry overlay card
+  const latestPunch = attendanceLogs[0];
+  const latestEmployee = latestPunch?.employees;
+  const punchEmpName = latestEmployee
+    ? `${latestEmployee.first_name} ${latestEmployee.last_name}`
+    : "Felix Izah";
+  const punchInitials = punchEmpName
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const punchType = latestPunch?.check_type === "check_out" ? "Checked out" : "Checked in";
+  const punchTrust = latestPunch?.trust_score ?? 96.75;
+  const punchCoords =
+    latestPunch?.latitude && latestPunch?.longitude
+      ? `${latestPunch.latitude.toFixed(4)}, ${latestPunch.longitude.toFixed(4)}`
+      : `${activeSite.latitude.toFixed(4)}, ${activeSite.longitude.toFixed(4)}`;
+  const punchTime = latestPunch?.checked_at
+    ? new Date(latestPunch.checked_at).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "03:17 PM";
+
+  const currentRadius = editingSite ? editRadius : activeSite.radius_meters || 2000;
 
   return (
     <>
-      <div id="geofence-map-section" className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm space-y-3 scroll-mt-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <div className="flex items-center space-x-2">
-              <h3 className="font-bold text-gray-900 text-base">Live Site Geofence & Location Map</h3>
-              <span className="text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-medium border border-blue-100">
-                {editingSite ? "🎯 Boundary Edit Mode Active" : "Click map to drop pin"}
-              </span>
+      <div id="geofence" className="panel">
+        {/* Panel Head */}
+        <div className="panel-head">
+          <div className="panel-title">
+            <div>
+              <h2>Live site geofence &amp; location</h2>
+              <p>Real-time visualization of work sites, geofence perimeters and staff check-ins</p>
             </div>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Real-time visualization of work sites, geofence perimeters, and live staff check-ins.
-            </p>
           </div>
-
-          {/* Quick-Focus & Site Management Buttons */}
-          <div className="flex flex-wrap items-center gap-2">
-            {latestPunch && (
-              <button
-                type="button"
-                onClick={() => flyToLocation(latestPunch.latitude, latestPunch.longitude, 16)}
-                className="px-2.5 py-1 text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
-              >
-                <span>🎯</span>
-                <span>Focus Check-in ({latestPunch.latitude.toFixed(2)}, {latestPunch.longitude.toFixed(2)})</span>
-              </button>
-            )}
-
-            {siteList.map((site) => (
-              <div key={site.id} className="inline-flex items-center rounded-lg border border-gray-200 bg-gray-50 p-0.5 shadow-xs">
-                <button
-                  type="button"
-                  onClick={() => flyToLocation(site.latitude, site.longitude, 15)}
-                  className="px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-white rounded-md transition-colors flex items-center gap-1"
-                >
-                  <span>🏢</span>
-                  <span>{site.name}</span>
-                  <span className="text-[10px] text-gray-400 font-mono">({site.radius_meters}m)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => startEditingSite(site)}
-                  className={`px-2 py-1 text-xs font-semibold rounded-md transition-colors ${
-                    editingSite?.id === site.id
-                      ? "bg-blue-600 text-white"
-                      : "text-blue-600 hover:bg-blue-50"
-                  }`}
-                  title="Adjust geofence perimeter radius & location"
-                >
-                  ✏️ Edit
-                </button>
-              </div>
-            ))}
+          <div className="btn-group">
+            <button
+              type="button"
+              onClick={() => {
+                if (editingSite) {
+                  handleCancelEdit();
+                } else {
+                  startEditingSite(activeSite);
+                }
+              }}
+              className="btn btn-outline btn-sm"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 3 3 7.5v5C3 17.7 6.8 21.6 12 22.9c5.2-1.3 9-5.2 9-10.4v-5L12 3Z"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                />
+              </svg>
+              {activeSite.name} · {currentRadius}m
+              {editingSite ? " (Tuning)" : ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setClickedCoords(null);
+                setIsModalOpen(true);
+              }}
+              className="btn btn-dark btn-sm"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              Deploy site
+            </button>
           </div>
         </div>
 
-        {/* Dynamic Interactive Geofence Editor Bar */}
+        {/* Perimeter Editor Bar (when toggled) */}
         {editingSite && (
-          <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 border-2 border-blue-400/40 rounded-xl p-4 space-y-3 shadow-md animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="p-4 bg-[#FCFAF8] border-b border-[var(--line)] space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div className="flex items-center space-x-2">
-                <span className="flex h-3 w-3 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-600"></span>
+                <span className="dot dot-teal"></span>
+                <span className="font-semibold text-xs text-[var(--text)]">
+                  Perimeter Tuning: <span className="mono">{editingSite.name}</span>
                 </span>
-                <h4 className="font-bold text-blue-900 text-sm">
-                  Editing Geofence: <span className="underline decoration-blue-400">{editingSite.name}</span>
-                </h4>
-                <span className="text-[11px] bg-blue-200/60 text-blue-800 font-medium px-2 py-0.5 rounded-full hidden sm:inline-block">
-                  Drag 🏢 marker or click map to reposition center
+                <span className="text-[11px] text-[var(--text-faint)]">
+                  Adjust boundary radius for mobile verification
                 </span>
               </div>
               <div className="flex items-center space-x-2">
@@ -546,123 +576,135 @@ export default function SiteGeofenceMap({ sites, attendanceLogs }: SiteGeofenceM
                   type="button"
                   onClick={handleCancelEdit}
                   disabled={isSaving}
-                  className="px-3 py-1.5 text-xs font-semibold text-gray-600 hover:text-gray-900 bg-white hover:bg-gray-100 border border-gray-200 rounded-lg transition-colors"
+                  className="btn btn-ghost btn-sm"
                 >
-                  ✕ Cancel
+                  Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveGeofence}
                   disabled={isSaving}
-                  className="px-4 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all flex items-center space-x-1.5 disabled:opacity-50"
+                  className="btn btn-dark btn-sm"
                 >
-                  {isSaving ? (
-                    <>
-                      <span className="animate-spin text-xs">⏳</span>
-                      <span>Saving...</span>
-                    </>
-                  ) : saveSuccess ? (
-                    <>
-                      <span>✓</span>
-                      <span>Saved!</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>💾</span>
-                      <span>Save Boundary</span>
-                    </>
-                  )}
+                  {isSaving ? "Saving..." : saveSuccess ? "Saved" : "Save Perimeter"}
                 </button>
               </div>
             </div>
 
-            {/* Radius Slider & Quick Presets */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
               <div className="space-y-1.5">
                 <div className="flex justify-between items-center text-xs">
-                  <span className="font-semibold text-gray-700">Perimeter Radius:</span>
-                  <span className="font-mono font-bold text-blue-700 bg-white px-2.5 py-0.5 rounded border border-blue-200 shadow-xs">
-                    {editRadius} meters
-                  </span>
+                  <span className="text-[var(--text-mute)]">Perimeter Radius:</span>
+                  <span className="mono font-bold text-[var(--teal)]">{editRadius}m</span>
                 </div>
                 <input
                   type="range"
-                  min="15"
-                  max="500"
-                  step="5"
+                  min="200"
+                  max="5000"
+                  step="100"
                   value={editRadius}
-                  onChange={(e) => handleRadiusChange(Number(e.target.value))}
-                  className="w-full accent-blue-600 h-2 bg-blue-200/60 rounded-lg cursor-pointer"
+                  onChange={(e) => setEditRadius(Number(e.target.value))}
+                  className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[var(--teal)]"
                 />
-                {/* Quick Presets */}
-                <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                  <span className="text-[11px] text-gray-400">Presets:</span>
-                  {[25, 50, 100, 150, 250, 500].map((p) => (
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="text-xs text-[var(--text-mute)]">Quick Presets:</div>
+                <div className="flex gap-2">
+                  {[500, 1000, 2000, 5000].map((preset) => (
                     <button
-                      key={p}
+                      key={preset}
                       type="button"
-                      onClick={() => handleRadiusChange(p)}
-                      className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
-                        editRadius === p
-                          ? "bg-blue-600 text-white shadow-xs"
-                          : "bg-white text-gray-600 hover:bg-blue-50 border border-gray-200"
+                      onClick={() => setEditRadius(preset)}
+                      className={`px-2 py-1 text-xs rounded border transition-colors ${
+                        editRadius === preset
+                          ? "bg-[var(--teal)] text-white border-[var(--teal)]"
+                          : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
                       }`}
                     >
-                      {p}m
+                      {preset >= 1000 ? `${preset / 1000}km` : `${preset}m`}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Coordinates Readout & Explainer */}
-              <div className="flex flex-col justify-between bg-white/80 rounded-lg p-3 border border-blue-100 text-xs">
-                <div className="flex items-center justify-between text-gray-700">
-                  <span className="font-medium">Site Center GPS:</span>
-                  <span className="font-mono text-blue-900 font-bold bg-blue-50/50 px-2 py-0.5 rounded">
-                    📍 {editLat.toFixed(6)}, {editLng.toFixed(6)}
+              <div className="bg-white rounded p-3 border border-[var(--line)] text-xs flex flex-col justify-between">
+                <div className="flex items-center justify-between text-[var(--text-mute)]">
+                  <span>Center GPS:</span>
+                  <span className="mono text-[var(--text)] font-semibold">
+                    {editLat.toFixed(4)}, {editLng.toFixed(4)}
                   </span>
                 </div>
-                <p className="text-[11px] text-gray-500 mt-1.5">
-                  🛡️ Staff mobile punches outside this {editRadius}m circle are automatically flagged with a trust penalty.
+                <p className="text-[11px] text-[var(--text-faint)] mt-1">
+                  All facial punches outside this {editRadius}m geofence ring will be flagged automatically by the anomaly engine.
                 </p>
               </div>
             </div>
           </div>
         )}
 
-        {/* Legend & Deploy Site Action */}
-        <div className="flex items-center justify-between text-xs text-gray-500 border-t border-gray-100 pt-2">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
-              <span>Verified Check-in</span>
-            </div>
-            <div className="flex items-center space-x-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-              <span>Moderate</span>
-            </div>
-            <div className="flex items-center space-x-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-600"></span>
-              <span>Flagged</span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setClickedCoords(null);
-              setIsModalOpen(true);
-            }}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors flex items-center space-x-1"
-          >
-            <span>＋</span>
-            <span>Deploy Site</span>
-          </button>
-        </div>
+        {/* Real Interactive Leaflet Geofence Map */}
+        <div className="map-wrap" style={{ height: "460px" }}>
+          <div
+            ref={mapContainerRef}
+            className="w-full h-full z-0 cursor-crosshair"
+            style={{ minHeight: "460px" }}
+          />
 
-        <div
-          ref={mapContainerRef}
-          className="w-full h-80 rounded-lg overflow-hidden border border-gray-100 z-0 cursor-crosshair"
-        />
+          {/* Floating Telemetry Card */}
+          {latestPunch && (
+            <div className="map-card" style={{ zIndex: 500 }}>
+              <div className="map-card-top">
+                <div className="map-avatar">{punchInitials}</div>
+                <div>
+                  <div className="map-card-name">{punchEmpName}</div>
+                  <div className="map-card-status flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--teal)] inline-block" />
+                    <span>{punchType}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="map-card-row">
+                <span>Trust score</span>
+                <span className="mono" style={{ color: "var(--teal)", fontWeight: 700 }}>
+                  {punchTrust.toFixed(2)}%
+                </span>
+              </div>
+              <div className="map-card-row">
+                <span>Coordinates</span>
+                <span className="mono">{punchCoords}</span>
+              </div>
+              <div className="map-card-row">
+                <span>Time</span>
+                <span className="mono">{punchTime}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (latestPunch?.latitude && latestPunch?.longitude) {
+                    flyToLocation(latestPunch.latitude, latestPunch.longitude, 16);
+                  }
+                }}
+                className="btn btn-outline btn-sm w-full mt-2 text-[11px] py-1"
+              >
+                Focus on Pin
+              </button>
+            </div>
+          )}
+
+          {/* Map Legend */}
+          <div className="map-legend" style={{ zIndex: 500 }}>
+            <span>
+              <span className="dot dot-teal"></span>Verified
+            </span>
+            <span>
+              <span className="dot dot-amber"></span>Moderate
+            </span>
+            <span>
+              <span className="dot dot-red"></span>Flagged
+            </span>
+          </div>
+        </div>
       </div>
 
       <CreateSiteModal
