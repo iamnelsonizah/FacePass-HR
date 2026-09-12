@@ -27,14 +27,17 @@ async def lifespan(app: FastAPI):
     Starts FacePass backend immediately so health checks succeed instantly.
     Loads InsightFace model in a background thread.
     """
+    import os
     import threading
     from app.services.face_recognition import face_service
 
     logger.info("Starting FacePass backend...")
 
-    # Load model in a background daemon thread so HTTP server binds instantly
-    thread = threading.Thread(target=face_service.load_model, daemon=True)
-    thread.start()
+    if os.getenv("LOAD_FACE_MODEL_ON_STARTUP", "false").lower() in ("true", "1", "yes"):
+        thread = threading.Thread(target=face_service.load_model, daemon=True)
+        thread.start()
+    else:
+        logger.info("Startup face model loading disabled (keeps memory footprint under 50MB for cloud).")
 
     yield
 
@@ -52,10 +55,11 @@ app = FastAPI(
 
 # Configure CORS
 settings = get_settings()
+is_wildcard = "*" in settings.cors_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_credentials=not is_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )

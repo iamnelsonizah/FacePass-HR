@@ -109,7 +109,7 @@ async def enroll_employee(
     # Verify employee exists
     employee = (
         supabase.table("employees")
-        .select("id, is_enrolled")
+        .select("id, is_enrolled, auth_user_id, company_id, email")
         .eq("id", employee_id)
         .single()
         .execute()
@@ -124,6 +124,7 @@ async def enroll_employee(
     # Extract embeddings from each image
     angles = ["front", "left", "right", "up", "down"]
     embeddings_stored = 0
+    primary_image_bytes = None
 
     for i, image in enumerate(images):
         image_bytes = await image.read()
@@ -132,6 +133,9 @@ async def enroll_employee(
         if embedding is None:
             logger.warning(f"No face detected in image {i + 1} for employee {employee_id}")
             continue
+
+        if primary_image_bytes is None:
+            primary_image_bytes = image_bytes
 
         # Store embedding in Supabase
         embedding_data = {
@@ -150,8 +154,52 @@ async def enroll_employee(
             detail="No faces detected in any of the provided images. Please try again with clearer photos.",
         )
 
-    # Mark employee as enrolled
-    supabase.table("employees").update({"is_enrolled": True}).eq("id", employee_id).execute()
+    # Upload primary enrollment portrait to Supabase Storage
+    avatar_url = None
+    if primary_image_bytes:
+        try:
+            storage_path = f"enrollment/{employee_id}.jpg"
+            supabase.storage.from_("attendance-snapshots").upload(
+                path=storage_path,
+                file=primary_image_bytes,
+                file_options={"content-type": "image/jpeg", "upsert": "true"},
+            )
+            avatar_url = supabase.storage.from_("attendance-snapshots").get_public_url(storage_path)
+        except Exception as upload_err:
+            logger.warning(f"Could not upload enrollment avatar: {upload_err}")
+
+    # Mark employee as enrolled and store master avatar URL
+    update_data = {"is_enrolled": True}
+    if avatar_url:
+        update_data["avatar_url"] = avatar_url
+    supabase.table("employees").update(update_data).eq("id", employee_id).execute()
+
+    # Automatically ensure user is registered in admin_users so the administrator can track all enrollments
+    emp_data = employee.data or {}
+    auth_user_id = emp_data.get("auth_user_id") or current_user.get("id")
+    company_id = emp_data.get("company_id")
+    email = emp_data.get("email") or current_user.get("email")
+
+    if auth_user_id and company_id and email:
+        try:
+            existing_admin = (
+                supabase.table("admin_users")
+                .select("id")
+                .eq("auth_user_id", auth_user_id)
+                .limit(1)
+                .execute()
+            )
+            if not existing_admin.data:
+                supabase.table("admin_users").insert({
+                    "auth_user_id": auth_user_id,
+                    "company_id": company_id,
+                    "email": email,
+                    "role": "admin",
+                    "is_active": True,
+                }).execute()
+                logger.info(f"Auto-registered {email} into admin_users for enrollment tracking")
+        except Exception as admin_err:
+            logger.warning(f"Could not auto-insert admin record: {admin_err}")
 
     return {
         "message": f"Successfully enrolled with {embeddings_stored} face embeddings",

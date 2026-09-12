@@ -1,0 +1,23 @@
+# Exclude build and cache artifacts
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Exclude signing keys and secrets
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Exclude logs & caches
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+
+# Explicitly ensure .env is included for EAS builds
+!.env

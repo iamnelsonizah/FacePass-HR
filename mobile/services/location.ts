@@ -87,14 +87,23 @@ export async function getPlaceName(
     const results = await Location.reverseGeocodeAsync({ latitude, longitude });
     if (results && results.length > 0) {
       const item = results[0];
-      const siteName =
-        item.name || item.street || item.district || "Current Location";
+      let siteName = item.name || item.street || item.district || "Current Location";
+      if (item.name && item.street && item.name !== item.street) {
+        if (/^\d+/.test(item.name)) {
+          siteName = `${item.name} ${item.street}`;
+        } else {
+          siteName = item.name;
+        }
+      } else if (item.street) {
+        siteName = item.street;
+      }
+
       const parts = [
         item.city || item.subregion || item.district,
         item.region || item.country,
       ].filter(Boolean);
       const siteCity =
-        parts.length > 0 ? parts.join(", ") : "Detected Worksite";
+        parts.length > 0 ? parts.join(", ") : "Detected Location";
       return { siteName, siteCity };
     }
   } catch (err) {

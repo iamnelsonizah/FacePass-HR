@@ -3,9 +3,10 @@ import { Slot, useRouter, useSegments } from "expo-router";
 import { View, ActivityIndicator, StyleSheet, LogBox } from "react-native";
 import { StatusBar } from "expo-status-bar";
 
-LogBox.ignoreLogs(["Cannot connect to Expo CLI"]);
+LogBox.ignoreAllLogs();
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { onAuthStateChange, getSession } from "../services/auth";
+import { supabase } from "../lib/supabase";
 import { Session } from "@supabase/supabase-js";
 
 /**
@@ -19,11 +20,29 @@ export default function RootLayout() {
   const segments = useSegments();
 
   useEffect(() => {
-    // Check initial session
-    getSession().then((s) => {
-      setSession(s);
-      setLoading(false);
-    });
+    // Validate session with Supabase server on app start
+    supabase.auth
+      .getUser()
+      .then(({ data: { user }, error }) => {
+        if (error || !user) {
+          // Stale or revoked session in storage: wipe clean and direct to login
+          supabase.auth.signOut().finally(() => {
+            setSession(null);
+            setLoading(false);
+          });
+        } else {
+          getSession().then((s) => {
+            setSession(s);
+            setLoading(false);
+          });
+        }
+      })
+      .catch(() => {
+        getSession().then((s) => {
+          setSession(s);
+          setLoading(false);
+        });
+      });
 
     // Listen for auth changes
     const subscription = onAuthStateChange((_event, session) => {

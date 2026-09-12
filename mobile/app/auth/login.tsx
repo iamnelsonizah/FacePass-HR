@@ -35,6 +35,7 @@ import {
   BiometricStatus,
 } from "../../services/biometrics";
 import OnboardingCarousel from "../../components/OnboardingCarousel";
+import PremiumFaceIdIcon from "../../components/PremiumFaceIdIcon";
 
 type AuthFlow =
   | "login"
@@ -206,12 +207,10 @@ export default function LoginScreen() {
           setOtpDigits(["", "", "", "", "", ""]);
           setResendCountdown(60);
           setAuthFlow("otp_verify");
-          if (res.dev_code) {
-            Alert.alert(
-              "Verification Code Sent",
-              `We sent a 6-digit code to ${res.email || emailOrId}.\n\n(Dev Code: ${res.dev_code})`
-            );
-          }
+          Alert.alert(
+            "Verification Code Sent",
+            "A 6-digit activation code has been sent to your email. Please check your inbox and enter the code."
+          );
         } else {
           Alert.alert("Account Created! 🎉", "Please sign in with your credentials.");
           setIsSignUp(false);
@@ -267,14 +266,12 @@ export default function LoginScreen() {
     if (resendCountdown > 0) return;
     setLoading(true);
     try {
-      const res = await resendActivation(pendingEmail);
+      await resendActivation(pendingEmail);
       setResendCountdown(60);
       setOtpDigits(["", "", "", "", "", ""]);
       Alert.alert(
         "Code Sent",
-        res.dev_code
-          ? `A new 6-digit activation code has been sent.\n\n(Dev Code: ${res.dev_code})`
-          : "A new 6-digit activation code has been sent to your email."
+        "A new 6-digit activation code has been sent to your email."
       );
     } catch (error: any) {
       const msg = error?.response?.data?.detail || error?.message || "Failed to resend code.";
@@ -297,14 +294,28 @@ export default function LoginScreen() {
       setResetOtpDigits(["", "", "", "", "", ""]);
       setResendCountdown(60);
       setAuthFlow("forgot_step2");
-      if (res.dev_code) {
-        Alert.alert(
-          "Reset Code Sent",
-          `A 6-digit reset code has been sent.\n\n(Dev Code: ${res.dev_code})`
-        );
-      }
+      Alert.alert(
+        "Code Sent",
+        "A 6-digit code has been sent to your email. Please check your email and enter the code."
+      );
     } catch (error: any) {
       const msg = error?.response?.data?.detail || error?.message || "Failed to send reset code.";
+      Alert.alert("Notice", msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendResetCode = async () => {
+    if (resendCountdown > 0) return;
+    setLoading(true);
+    try {
+      await forgotPassword(resetEmail);
+      setResendCountdown(60);
+      setResetOtpDigits(["", "", "", "", "", ""]);
+      Alert.alert("Code Sent", "A 6-digit code has been sent to your email.");
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail || error?.message || "Failed to resend code.";
       Alert.alert("Notice", msg);
     } finally {
       setLoading(false);
@@ -583,7 +594,7 @@ export default function LoginScreen() {
 
               <View style={styles.idCardCodeRow}>
                 <Text style={styles.badgeCode}>
-                  {activatedEmployeeCode || "FP-14974"}
+                  {activatedEmployeeCode || "Verified"}
                 </Text>
                 <TouchableOpacity
                   style={styles.copyIdBtn}
@@ -739,6 +750,23 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
+            <View style={styles.resendRow}>
+              <Text style={styles.resendLabel}>Didn't receive the code? </Text>
+              <TouchableOpacity
+                onPress={handleResendResetCode}
+                disabled={resendCountdown > 0}
+              >
+                <Text
+                  style={[
+                    styles.resendLink,
+                    resendCountdown > 0 && styles.resendLinkDisabled,
+                  ]}
+                >
+                  {resendCountdown > 0 ? `Resend in ${resendCountdown}s` : "Resend Code"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             <TouchableOpacity
               style={styles.flowSecondaryLink}
               onPress={() => setAuthFlow("forgot_step1")}
@@ -842,8 +870,11 @@ export default function LoginScreen() {
       <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <ScrollView contentContainerStyle={styles.activatedScrollContent}>
           <View style={styles.activatedCard}>
-            <View style={[styles.confettiIconContainer, { backgroundColor: "#DCFCE7" }]}>
-              <Ionicons name="checkmark-circle" size={48} color="#16A34A" />
+            {/* Premium Dual-Ring Emerald Success Icon */}
+            <View style={styles.passwordSuccessIconRing}>
+              <View style={styles.passwordSuccessIconInner}>
+                <Ionicons name="checkmark" size={32} color="#FFFFFF" />
+              </View>
             </View>
 
             <Text style={styles.activatedTitle}>Password Updated!</Text>
@@ -853,11 +884,12 @@ export default function LoginScreen() {
             </Text>
 
             <TouchableOpacity
-              style={styles.flowPrimaryButton}
+              style={styles.activatedPrimaryButton}
               onPress={resetToLogin}
               activeOpacity={0.88}
             >
-              <Text style={styles.flowPrimaryButtonText}>Sign In Now →</Text>
+              <Text style={styles.activatedPrimaryButtonText}>Sign In Now</Text>
+              <Ionicons name="arrow-forward" size={18} color="#FFFFFF" style={{ marginLeft: 8 }} />
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -887,9 +919,8 @@ export default function LoginScreen() {
           <View style={styles.topBar}>
             <View style={styles.headerBrand}>
               <View style={styles.logoBadge}>
-                <MaterialCommunityIcons
-                  name="face-recognition"
-                  size={26}
+                <PremiumFaceIdIcon
+                  size={24}
                   color="#2563EB"
                 />
               </View>
@@ -1768,9 +1799,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#EFF6FF",
   },
   flowPrimaryButton: {
+    width: "100%",
     backgroundColor: "#2563EB",
     borderRadius: 16,
+    height: 56,
     paddingVertical: 16,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#2563EB",
@@ -1855,6 +1889,34 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowOffset: { width: 0, height: 6 },
     shadowRadius: 12,
+    elevation: 4,
+  },
+  passwordSuccessIconRing: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: "#ECFDF5",
+    borderWidth: 2.5,
+    borderColor: "#A7F3D0",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 20,
+    shadowColor: "#10B981",
+    shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 12,
+  },
+  passwordSuccessIconInner: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: "#10B981",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#10B981",
+    shadowOpacity: 0.35,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 8,
     elevation: 4,
   },
   confettiEmoji: {

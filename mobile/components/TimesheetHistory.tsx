@@ -7,8 +7,11 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Image,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { getMyAttendanceHistory } from "../services/api";
+import EmptyTimesheetIllustration from "./EmptyTimesheetIllustration";
 
 interface AttendanceItem {
   id: string;
@@ -25,9 +28,15 @@ interface AttendanceItem {
 
 interface TimesheetHistoryProps {
   onClose: () => void;
+  userProfile?: {
+    first_name?: string;
+    last_name?: string;
+    employee_code?: string;
+    avatar_url?: string | null;
+  };
 }
 
-export default function TimesheetHistory({ onClose }: TimesheetHistoryProps) {
+export default function TimesheetHistory({ onClose, userProfile }: TimesheetHistoryProps) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [historyData, setHistoryData] = useState<{
@@ -59,6 +68,26 @@ export default function TimesheetHistory({ onClose }: TimesheetHistoryProps) {
     loadHistory();
   };
 
+  // Profile data resolution
+  const resolvedName =
+    userProfile?.first_name || userProfile?.last_name
+      ? `${userProfile.first_name || ""} ${userProfile.last_name || ""}`.trim()
+      : historyData?.employee_name || "Team Member";
+
+  const resolvedCode =
+    userProfile?.employee_code || historyData?.employee_code || "";
+
+  const initials =
+    resolvedName
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2) || "FP";
+
+  const verifiedRate = historyData?.verified_rate ?? 100;
+
   const renderItem = ({ item }: { item: AttendanceItem }) => {
     const isCheckIn = item.check_type === "check_in";
     const dateObj = new Date(item.checked_at);
@@ -81,7 +110,11 @@ export default function TimesheetHistory({ onClose }: TimesheetHistoryProps) {
               isCheckIn ? styles.typeBadgeIn : styles.typeBadgeOut,
             ]}
           >
-            <Text style={styles.typeText}>{isCheckIn ? "IN" : "OUT"}</Text>
+            <Ionicons
+              name={isCheckIn ? "arrow-down" : "arrow-up"}
+              size={18}
+              color={isCheckIn ? "#059669" : "#2563EB"}
+            />
           </View>
           <View>
             <Text style={styles.siteText}>
@@ -120,29 +153,51 @@ export default function TimesheetHistory({ onClose }: TimesheetHistoryProps) {
 
   return (
     <View style={styles.container}>
-      {/* Header Bar */}
+      {/* Top Header Bar */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-          <Text style={styles.closeText}>✕ Close</Text>
+        <TouchableOpacity
+          onPress={onClose}
+          style={styles.closeButton}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="close" size={24} color="#1E293B" />
         </TouchableOpacity>
-        <Text style={styles.title}>My Timesheet</Text>
-        <View style={{ width: 60 }} />
+        <Text style={styles.headerTitle}>My Timesheet</Text>
+        <View style={styles.headerRightSpace} />
       </View>
 
-      {/* Summary Banner */}
-      {historyData && (
-        <View style={styles.summaryCard}>
-          <View>
-            <Text style={styles.employeeName}>{historyData.employee_name}</Text>
-            <Text style={styles.employeeCode}>{historyData.employee_code || "Staff ID"}</Text>
-          </View>
-          <View style={styles.ratePill}>
-            <Text style={styles.rateNumber}>{historyData.verified_rate}%</Text>
-            <Text style={styles.rateLabel}>Verified Rate</Text>
+      {/* Profile Header Summary */}
+      <View style={styles.profileSection}>
+        <View style={styles.profileLeft}>
+          {userProfile?.avatar_url ? (
+            <Image
+              source={{ uri: userProfile.avatar_url }}
+              style={styles.avatarImage}
+            />
+          ) : (
+            <View style={styles.avatarInitials}>
+              <Text style={styles.avatarInitialsText}>{initials}</Text>
+            </View>
+          )}
+
+          <View style={styles.profileTextGroup}>
+            <Text style={styles.profileName}>{resolvedName}</Text>
+            <Text style={styles.profileCode}>{resolvedCode}</Text>
           </View>
         </View>
-      )}
 
+        {/* Verified Rate Pill */}
+        <View style={styles.ratePill}>
+          <View style={styles.rateTopRow}>
+            <Ionicons name="shield-checkmark" size={15} color="#059669" />
+            <Text style={styles.rateValue}>{verifiedRate}%</Text>
+          </View>
+          <Text style={styles.rateLabel}>VERIFIED RATE</Text>
+        </View>
+      </View>
+
+      {/* Content Area */}
       {loading ? (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#2563EB" />
@@ -153,16 +208,21 @@ export default function TimesheetHistory({ onClose }: TimesheetHistoryProps) {
           data={historyData?.logs || []}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[
+            styles.listContent,
+            (!historyData?.logs || historyData.logs.length === 0) &&
+              styles.emptyListContent,
+          ]}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyEmoji}>📋</Text>
+              <EmptyTimesheetIllustration />
               <Text style={styles.emptyTitle}>No Attendance Records Yet</Text>
               <Text style={styles.emptySub}>
-                Your check-ins and check-outs will appear here.
+                Your check-ins and check-outs will appear
+here once you start logging your time.
               </Text>
             </View>
           }
@@ -175,92 +235,141 @@ export default function TimesheetHistory({ onClose }: TimesheetHistoryProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F9FAFB",
+    backgroundColor: "#FFFFFF",
   },
+
+  // Top Header Bar
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
     paddingVertical: 14,
-    backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
+    borderBottomColor: "#F1F5F9",
+    backgroundColor: "#FFFFFF",
   },
   closeButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    width: 32,
+    height: 32,
+    alignItems: "flex-start",
+    justifyContent: "center",
   },
-  closeText: {
-    color: "#4B5563",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  title: {
+  headerTitle: {
     fontSize: 18,
-    fontWeight: "bold",
-    color: "#111827",
+    fontWeight: "700",
+    color: "#0F172A",
+    textAlign: "center",
+    flex: 1,
+    letterSpacing: -0.3,
   },
-  summaryCard: {
+  headerRightSpace: {
+    width: 32,
+  },
+
+  // Profile Section
+  profileSection: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#EFF6FF",
-    marginHorizontal: 16,
-    marginTop: 14,
-    marginBottom: 8,
-    padding: 16,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#BFDBFE",
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+    backgroundColor: "#FFFFFF",
   },
-  employeeName: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#1E3A8A",
-  },
-  employeeCode: {
-    fontSize: 13,
-    color: "#3B82F6",
-    marginTop: 2,
-  },
-  ratePill: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
+  profileLeft: {
+    flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#DBEAFE",
   },
-  rateNumber: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#16A34A",
+  avatarInitials: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#0B3B2C",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarInitialsText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  avatarImage: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#E2E8F0",
+  },
+  profileTextGroup: {
+    marginLeft: 14,
+  },
+  profileName: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.3,
+  },
+  profileCode: {
+    fontSize: 13,
+    color: "#64748B",
+    fontWeight: "500",
+    marginTop: 3,
+  },
+
+  // Verified Rate Pill
+  ratePill: {
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#D1FAE5",
+    borderRadius: 12,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    alignItems: "center",
+  },
+  rateTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  rateValue: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#059669",
   },
   rateLabel: {
-    fontSize: 10,
-    color: "#6B7280",
-    textTransform: "uppercase",
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: "#059669",
+    letterSpacing: 0.6,
+    marginTop: 2,
   },
+
+  // List & Cards
   listContent: {
     padding: 16,
     paddingBottom: 40,
+  },
+  emptyListContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    paddingBottom: 100,
   },
   card: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     padding: 14,
-    borderRadius: 12,
+    borderRadius: 16,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
+    borderColor: "#E2E8F0",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
     elevation: 1,
   },
   cardLeft: {
@@ -270,31 +379,30 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   typeBadge: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   typeBadgeIn: {
-    backgroundColor: "#DCFCE7",
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
   },
   typeBadgeOut: {
-    backgroundColor: "#FEE2E2",
-  },
-  typeText: {
-    fontSize: 12,
-    fontWeight: "bold",
-    color: "#111827",
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
   },
   siteText: {
     fontSize: 14,
-    fontWeight: "600",
-    color: "#111827",
+    fontWeight: "700",
+    color: "#0F172A",
   },
   dateText: {
     fontSize: 12,
-    color: "#6B7280",
+    color: "#64748B",
     marginTop: 2,
   },
   flagReasonText: {
@@ -312,20 +420,20 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   statusBadgeVerified: {
-    backgroundColor: "#DCFCE7",
+    backgroundColor: "#ECFDF5",
   },
   statusBadgeFlagged: {
     backgroundColor: "#FEF3C7",
   },
   statusText: {
     fontSize: 11,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   statusTextVerified: {
-    color: "#15803D",
+    color: "#059669",
   },
   statusTextFlagged: {
-    color: "#B45309",
+    color: "#D97706",
   },
   trustScoreText: {
     fontSize: 12,
@@ -338,27 +446,32 @@ const styles = StyleSheet.create({
     padding: 30,
   },
   loadingText: {
-    color: "#6B7280",
+    color: "#64748B",
     marginTop: 10,
     fontSize: 14,
+    fontWeight: "500",
   },
+
+  // Empty State
   emptyContainer: {
-    paddingTop: 60,
     alignItems: "center",
-  },
-  emptyEmoji: {
-    fontSize: 48,
-    marginBottom: 12,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    paddingTop: 40,
   },
   emptyTitle: {
-    fontSize: 17,
-    fontWeight: "bold",
-    color: "#374151",
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0F172A",
+    textAlign: "center",
+    marginTop: 26,
+    letterSpacing: -0.3,
   },
   emptySub: {
-    fontSize: 13,
-    color: "#9CA3AF",
-    marginTop: 4,
+    fontSize: 14,
+    color: "#64748B",
     textAlign: "center",
+    marginTop: 8,
+    lineHeight: 21,
   },
 });

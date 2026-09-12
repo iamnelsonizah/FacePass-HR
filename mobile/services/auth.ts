@@ -103,11 +103,11 @@ export async function signIn(emailOrId: string, password: string) {
     password,
   });
 
-  const { access_token, employee_code, email, user_id } = response.data;
+  const { access_token, refresh_token, employee_code, email, user_id } = response.data;
   if (access_token) {
     await supabase.auth.setSession({
       access_token,
-      refresh_token: access_token,
+      refresh_token: refresh_token || access_token,
     });
   }
 

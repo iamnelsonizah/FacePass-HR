@@ -19,8 +19,8 @@ export default function CreateSiteModal({
 }: CreateSiteModalProps) {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
-  const [latitude, setLatitude] = useState(initialLat ? initialLat.toFixed(6) : "6.5244");
-  const [longitude, setLongitude] = useState(initialLng ? initialLng.toFixed(6) : "3.3792");
+  const [latitude, setLatitude] = useState(initialLat ? initialLat.toFixed(6) : "31.639347");
+  const [longitude, setLongitude] = useState(initialLng ? initialLng.toFixed(6) : "-8.009598");
   const [radius, setRadius] = useState(150);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +38,7 @@ export default function CreateSiteModal({
     setError(null);
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const backendUrl = process.env.NEXT_PUBLIC_API_URL || "https://facepass-hr.fastapicloud.dev";
       const res = await fetch(`${backendUrl}/api/admin/sites`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

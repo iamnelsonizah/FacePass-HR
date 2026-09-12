@@ -164,6 +164,7 @@ export default function FraudAlertsList({ initialAlerts }: FraudAlertsListProps)
                 <button
                   onClick={() => setSelectedDispute({
                     id: alert.attendance_id,
+                    employee_id: alert.employee_id,
                     checked_at: alert.created_at,
                     check_type: "check_in",
                     trust_score: alert.details?.trust_score ?? 35,

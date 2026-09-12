@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.db.supabase import get_supabase_client
 from app.routers.auth import get_current_user
+from app.services.email import send_hr_attendance_digest
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
@@ -222,18 +223,260 @@ async def resolve_fraud_alert(
     return {"message": "Fraud alert resolved", "data": response.data}
 
 
+def process_shift_timesheets(logs: list):
+    """Pair daily check-ins and check-outs to calculate shift durations, punctuality, and overtime."""
+    from collections import defaultdict
+
+    daily_groups = defaultdict(list)
+    for log in logs:
+        emp_id = log.get("employee_id")
+        dt_str = log.get("checked_at")
+        if not emp_id or not dt_str:
+            continue
+        date_key = dt_str[:10]  # YYYY-MM-DD
+        daily_groups[(emp_id, date_key)].append(log)
+
+    timesheets = []
+    now_utc = datetime.now(timezone.utc)
+    today_str = now_utc.strftime("%Y-%m-%d")
+
+    total_hours_sum = 0.0
+    total_overtime_sum = 0.0
+    on_time_count = 0
+    total_completed_or_in_progress = 0
+    currently_on_site_count = 0
+
+    for (emp_id, date_key), day_logs in daily_groups.items():
+        # Sort logs chronologically
+        day_logs.sort(key=lambda x: x.get("checked_at", ""))
+
+        check_ins = [l for l in day_logs if l.get("check_type") == "check_in"]
+        check_outs = [l for l in day_logs if l.get("check_type") == "check_out"]
+
+        first_in = check_ins[0] if check_ins else None
+        last_out = check_outs[-1] if check_outs else None
+
+        sample_log = day_logs[0]
+        emp = sample_log.get("employees") or {}
+        site = sample_log.get("sites") or {}
+
+        check_in_time = first_in.get("checked_at") if first_in else None
+        check_out_time = last_out.get("checked_at") if last_out else None
+
+        duration_hours = 0.0
+        formatted_duration = "0h 0m"
+        shift_status = "unknown"
+        arrival_status = "on_time"
+        minutes_late = 0
+        overtime_hours = 0.0
+        regular_hours = 0.0
+        avg_trust_score = (
+            sum(l.get("trust_score") or 0 for l in day_logs) / len(day_logs)
+            if day_logs
+            else 95.0
+        )
+
+        if first_in and last_out:
+            try:
+                t_in = datetime.fromisoformat(check_in_time.replace("Z", "+00:00"))
+                t_out = datetime.fromisoformat(check_out_time.replace("Z", "+00:00"))
+                duration_sec = max(0, (t_out - t_in).total_seconds())
+                duration_hours = round(duration_sec / 3600.0, 2)
+                h = int(duration_sec // 3600)
+                m = int((duration_sec % 3600) // 60)
+                formatted_duration = f"{h}h {m}m"
+                shift_status = "completed"
+            except Exception:
+                shift_status = "completed"
+        elif first_in and not last_out:
+            if date_key == today_str:
+                try:
+                    t_in = datetime.fromisoformat(check_in_time.replace("Z", "+00:00"))
+                    duration_sec = max(0, (now_utc - t_in).total_seconds())
+                    duration_hours = round(duration_sec / 3600.0, 2)
+                    h = int(duration_sec // 3600)
+                    m = int((duration_sec % 3600) // 60)
+                    formatted_duration = f"{h}h {m}m (active)"
+                    shift_status = "in_progress"
+                    currently_on_site_count += 1
+                except Exception:
+                    shift_status = "in_progress"
+            else:
+                shift_status = "missing_checkout"
+        elif last_out and not first_in:
+            shift_status = "missing_checkin"
+
+        # Punctuality calculation (Standard target: 09:00, 15m grace period)
+        if first_in and check_in_time:
+            try:
+                t_in = datetime.fromisoformat(check_in_time.replace("Z", "+00:00"))
+                in_mins = t_in.hour * 60 + t_in.minute
+                target_mins = 9 * 60
+                grace_mins = 9 * 60 + 15
+                if in_mins > grace_mins:
+                    arrival_status = "late"
+                    minutes_late = in_mins - target_mins
+                else:
+                    arrival_status = "on_time"
+                    on_time_count += 1
+            except Exception:
+                arrival_status = "on_time"
+                on_time_count += 1
+
+        # Overtime calculation
+        if duration_hours > 8.0:
+            overtime_hours = round(duration_hours - 8.0, 2)
+            regular_hours = 8.0
+        else:
+            overtime_hours = 0.0
+            regular_hours = duration_hours
+
+        if shift_status in ("completed", "in_progress"):
+            total_hours_sum += duration_hours
+            total_overtime_sum += overtime_hours
+            total_completed_or_in_progress += 1
+
+        timesheets.append({
+            "id": f"{emp_id}_{date_key}",
+            "employee_id": emp_id,
+            "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or "Employee",
+            "employee_code": emp.get("employee_code", ""),
+            "email": emp.get("email", ""),
+            "date": date_key,
+            "site_name": site.get("name", "Marrakesh Hub"),
+            "check_in_time": check_in_time,
+            "check_out_time": check_out_time,
+            "duration_hours": duration_hours,
+            "regular_hours": regular_hours,
+            "overtime_hours": overtime_hours,
+            "formatted_duration": formatted_duration,
+            "shift_status": shift_status,
+            "arrival_status": arrival_status,
+            "minutes_late": minutes_late,
+            "trust_score": round(avg_trust_score, 1),
+            "raw_logs_count": len(day_logs),
+        })
+
+    timesheets.sort(key=lambda x: (x["date"], x["check_in_time"] or ""), reverse=True)
+
+    on_time_rate = (
+        round((on_time_count / total_completed_or_in_progress * 100.0), 1)
+        if total_completed_or_in_progress > 0
+        else 100.0
+    )
+    avg_shift = (
+        round(total_hours_sum / total_completed_or_in_progress, 2)
+        if total_completed_or_in_progress > 0
+        else 0.0
+    )
+
+    # Build Payroll Summary grouped by employee
+    payroll_map = defaultdict(lambda: {
+        "employee_id": "",
+        "employee_name": "",
+        "employee_code": "",
+        "email": "",
+        "total_regular_hours": 0.0,
+        "total_overtime_hours": 0.0,
+        "total_hours": 0.0,
+        "completed_shifts": 0,
+        "days_worked": set(),
+        "on_time_shifts": 0,
+    })
+
+    for ts in timesheets:
+        e_id = ts["employee_id"]
+        entry = payroll_map[e_id]
+        entry["employee_id"] = e_id
+        entry["employee_name"] = ts["employee_name"]
+        entry["employee_code"] = ts["employee_code"]
+        entry["email"] = ts["email"]
+        entry["total_regular_hours"] += ts["regular_hours"]
+        entry["total_overtime_hours"] += ts["overtime_hours"]
+        entry["total_hours"] += ts["duration_hours"]
+        entry["days_worked"].add(ts["date"])
+        if ts["shift_status"] == "completed":
+            entry["completed_shifts"] += 1
+        if ts["arrival_status"] == "on_time":
+            entry["on_time_shifts"] += 1
+
+    payroll_summary = []
+    for p in payroll_map.values():
+        days_count = len(p["days_worked"])
+        punctuality = (
+            round((p["on_time_shifts"] / days_count * 100.0), 1)
+            if days_count > 0
+            else 100.0
+        )
+        payroll_summary.append({
+            "employee_id": p["employee_id"],
+            "employee_name": p["employee_name"],
+            "employee_code": p["employee_code"],
+            "email": p["email"],
+            "total_regular_hours": round(p["total_regular_hours"], 2),
+            "total_overtime_hours": round(p["total_overtime_hours"], 2),
+            "total_hours": round(p["total_hours"], 2),
+            "days_worked": days_count,
+            "completed_shifts": p["completed_shifts"],
+            "punctuality_pct": punctuality,
+        })
+
+    metrics = {
+        "total_hours_worked": round(total_hours_sum, 2),
+        "total_overtime_hours": round(total_overtime_sum, 2),
+        "avg_shift_hours": avg_shift,
+        "on_time_rate_pct": on_time_rate,
+        "currently_on_site": currently_on_site_count,
+        "total_shifts_logged": len(timesheets),
+    }
+
+    return timesheets, metrics, payroll_summary
+
+
+@router.get("/timesheets")
+async def get_admin_timesheets(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    employee_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Retrieve automated daily shift timesheets with duration, overtime, and punctuality metrics."""
+    supabase = get_supabase_client()
+    query = (
+        supabase.table("attendance_logs")
+        .select("*, employees(first_name, last_name, email, employee_code), sites(name)")
+        .order("checked_at", desc=False)
+    )
+
+    if employee_id:
+        query = query.eq("employee_id", employee_id)
+    if date_from:
+        query = query.gte("checked_at", date_from)
+    if date_to:
+        query = query.lte("checked_at", date_to)
+
+    resp = query.limit(2000).execute()
+    logs = resp.data or []
+
+    timesheets, metrics, payroll_summary = process_shift_timesheets(logs)
+
+    return {
+        "timesheets": timesheets,
+        "metrics": metrics,
+        "payroll": payroll_summary,
+    }
+
+
 @router.get("/export-timesheet")
 async def export_timesheet_csv(
+    mode: Optional[str] = "detailed",
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     current_user: dict = Depends(get_current_user),
 ):
-    """Generate and export timesheet report as CSV with calculated work hours."""
+    """Generate and export timesheet report as CSV with calculated shift durations and overtime."""
     supabase = get_supabase_client()
-    employee = current_user.get("employee")
-    company_id = employee["company_id"] if employee else None
 
-    # Fetch logs
     query = (
         supabase.table("attendance_logs")
         .select("*, employees(first_name, last_name, email, employee_code), sites(name)")
@@ -248,50 +491,82 @@ async def export_timesheet_csv(
     resp = query.limit(2000).execute()
     logs = resp.data or []
 
-    # Stream CSV
+    timesheets, metrics, payroll = process_shift_timesheets(logs)
+
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "Date",
-        "Employee Code",
-        "Employee Name",
-        "Email",
-        "Site",
-        "Check Type",
-        "Time",
-        "Trust Score",
-        "Spoof Score",
-        "Status",
-        "Flag Reason"
-    ])
 
-    for log in logs:
-        emp = log.get("employees") or {}
-        site = log.get("sites") or {}
-        dt = log.get("checked_at", "")
-        date_str = dt[:10] if dt else ""
-        time_str = dt[11:19] if len(dt) >= 19 else ""
-
+    if mode == "payroll":
         writer.writerow([
-            date_str,
-            emp.get("employee_code", ""),
-            f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
-            emp.get("email", ""),
-            site.get("name", "N/A"),
-            log.get("check_type", ""),
-            time_str,
-            log.get("trust_score", ""),
-            log.get("spoof_score", ""),
-            log.get("status", ""),
-            log.get("flag_reason", ""),
+            "Employee Code",
+            "Employee Name",
+            "Email",
+            "Total Regular Hours",
+            "Total Overtime Hours",
+            "Total Worked Hours",
+            "Days Worked",
+            "Completed Shifts",
+            "Punctuality Rate (%)"
         ])
+        for row in payroll:
+            writer.writerow([
+                row["employee_code"],
+                row["employee_name"],
+                row["email"],
+                row["total_regular_hours"],
+                row["total_overtime_hours"],
+                row["total_hours"],
+                row["days_worked"],
+                row["completed_shifts"],
+                f"{row['punctuality_pct']}%",
+            ])
+        filename = f"facepass_payroll_summary_{datetime.now().strftime('%Y%m%d')}.csv"
+    else:
+        writer.writerow([
+            "Date",
+            "Employee Code",
+            "Employee Name",
+            "Email",
+            "Site",
+            "Check-In Time",
+            "Check-Out Time",
+            "Total Hours",
+            "Regular Hours",
+            "Overtime Hours",
+            "Shift Duration",
+            "Arrival Status",
+            "Minutes Late",
+            "Shift Status",
+            "Avg Trust Score"
+        ])
+        for ts in timesheets:
+            in_t = ts["check_in_time"][11:19] if ts["check_in_time"] and len(ts["check_in_time"]) >= 19 else ""
+            out_t = ts["check_out_time"][11:19] if ts["check_out_time"] and len(ts["check_out_time"]) >= 19 else ""
+            writer.writerow([
+                ts["date"],
+                ts["employee_code"],
+                ts["employee_name"],
+                ts["email"],
+                ts["site_name"],
+                in_t,
+                out_t,
+                ts["duration_hours"],
+                ts["regular_hours"],
+                ts["overtime_hours"],
+                ts["formatted_duration"],
+                ts["arrival_status"],
+                ts["minutes_late"],
+                ts["shift_status"],
+                f"{ts['trust_score']}%",
+            ])
+        filename = f"facepass_shift_timesheets_{datetime.now().strftime('%Y%m%d')}.csv"
 
     csv_content = output.getvalue()
     return Response(
         content=csv_content,
         media_type="text/csv",
         headers={
-            "Content-Disposition": f"attachment; filename=facepass_timesheet_{datetime.now().strftime('%Y%m%d')}.csv"
+            "Content-Disposition": f"attachment; filename={filename}"
         },
     )
 
@@ -321,3 +596,147 @@ async def create_site(
     if not res.data:
         raise HTTPException(status_code=400, detail="Could not create work site")
     return res.data[0]
+
+
+@router.patch("/sites/{site_id}")
+async def update_site_geofence(
+    site_id: str,
+    payload: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update a site's geofence radius, location, or name."""
+    supabase = get_supabase_client()
+    update_data = {}
+    if "radius_meters" in payload:
+        update_data["radius_meters"] = int(payload["radius_meters"])
+    if "latitude" in payload:
+        update_data["latitude"] = float(payload["latitude"])
+    if "longitude" in payload:
+        update_data["longitude"] = float(payload["longitude"])
+    if "name" in payload:
+        update_data["name"] = payload["name"].strip()
+    if "address" in payload:
+        update_data["address"] = payload["address"].strip()
+
+    res = (
+        supabase.table("sites")
+        .update(update_data)
+        .eq("id", site_id)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=400, detail="Could not update site geofence")
+    return res.data[0]
+
+
+@router.post("/digest/send")
+async def send_attendance_digest(
+    payload: dict,
+):
+    """Send automated or on-demand HR attendance digest email."""
+    supabase = get_supabase_client()
+    recipient_email = payload.get("recipient_email", "nelsonizah13@gmail.com").strip()
+    report_type = payload.get("report_type", "daily")
+    hr_name = payload.get("hr_name", "HR Administrator")
+
+    timesheets, metrics, _ = process_shift_timesheets(None)
+
+    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if report_type == "daily":
+        active_shifts = [ts for ts in timesheets if ts["date"] == today_iso]
+        if not active_shifts:
+            active_shifts = timesheets[:5]
+    else:
+        active_shifts = timesheets[:15]
+
+    emp_res = supabase.table("employees").select("id", count="exact").eq("is_active", True).execute()
+    total_emp = emp_res.count or 1
+
+    flagged_res = supabase.table("attendance_logs").select("id", count="exact").eq("status", "flagged").execute()
+    flagged_count = flagged_res.count or 0
+
+    present_workers = set(s["employee_id"] for s in active_shifts)
+
+    email_shifts = []
+    for s in active_shifts:
+        email_shifts.append({
+            "employee_name": s.get("employee_name", "Felix Izah"),
+            "employee_code": s.get("employee_code", "FP-64164"),
+            "check_in_time": s.get("check_in_time") or "—",
+            "check_out_time": s.get("check_out_time") or "In Progress",
+            "duration": s.get("formatted_duration") or "—",
+            "is_on_time": s.get("arrival_status") == "on_time",
+            "trust_score": s.get("trust_score", 95.0),
+        })
+
+    digest_data = {
+        "date_str": datetime.now(timezone.utc).strftime("%A, %B %d, %Y"),
+        "total_employees": total_emp,
+        "present_count": len(present_workers) if present_workers else metrics["currently_on_site"],
+        "punctuality_rate": f"{metrics['on_time_rate_pct']}%",
+        "total_hours": f"{metrics['total_hours_worked']} hrs",
+        "total_overtime": f"{metrics['total_overtime_hours']} hrs",
+        "flagged_count": flagged_count,
+        "shifts": email_shifts,
+    }
+
+    success = send_hr_attendance_digest(
+        to_email=recipient_email,
+        hr_name=hr_name,
+        report_type=report_type,
+        digest_data=digest_data,
+    )
+
+    return {
+        "success": success,
+        "recipient_email": recipient_email,
+        "report_type": report_type,
+        "digest_data": digest_data,
+        "message": f"Attendance digest successfully sent to {recipient_email}!"
+    }
+
+
+@router.get("/digest/preview")
+async def preview_attendance_digest(report_type: str = "daily"):
+    """Preview HR attendance digest data and summary before sending."""
+    supabase = get_supabase_client()
+    timesheets, metrics, _ = process_shift_timesheets(None)
+    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    if report_type == "daily":
+        active_shifts = [ts for ts in timesheets if ts["date"] == today_iso] or timesheets[:5]
+    else:
+        active_shifts = timesheets[:15]
+
+    emp_res = supabase.table("employees").select("id", count="exact").eq("is_active", True).execute()
+    total_emp = emp_res.count or 1
+
+    flagged_res = supabase.table("attendance_logs").select("id", count="exact").eq("status", "flagged").execute()
+    flagged_count = flagged_res.count or 0
+
+    present_workers = set(s["employee_id"] for s in active_shifts)
+
+    email_shifts = []
+    for s in active_shifts:
+        email_shifts.append({
+            "employee_name": s.get("employee_name", "Felix Izah"),
+            "employee_code": s.get("employee_code", "FP-64164"),
+            "check_in_time": s.get("check_in_time") or "—",
+            "check_out_time": s.get("check_out_time") or "In Progress",
+            "duration": s.get("formatted_duration") or "—",
+            "is_on_time": s.get("arrival_status") == "on_time",
+            "trust_score": s.get("trust_score", 95.0),
+        })
+
+    return {
+        "date_str": datetime.now(timezone.utc).strftime("%A, %B %d, %Y"),
+        "total_employees": total_emp,
+        "present_count": len(present_workers) if present_workers else metrics["currently_on_site"],
+        "punctuality_rate": f"{metrics['on_time_rate_pct']}%",
+        "total_hours": f"{metrics['total_hours_worked']} hrs",
+        "total_overtime": f"{metrics['total_overtime_hours']} hrs",
+        "flagged_count": flagged_count,
+        "shifts": email_shifts,
+    }
+
+

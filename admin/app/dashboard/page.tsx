@@ -1,10 +1,13 @@
+import Link from "next/link";
 import { createServerClient } from "@/lib/supabase-server";
 import StatsCard from "@/components/StatsCard";
 import EmployeeTable from "@/components/EmployeeTable";
 import AttendanceTable from "@/components/AttendanceTable";
 import FraudAlertsList from "@/components/FraudAlertsList";
 import TimesheetExportButton from "@/components/TimesheetExportButton";
+import TimesheetSection from "@/components/TimesheetSection";
 import SiteGeofenceMap from "@/components/SiteGeofenceMap";
+import AnalyticsSection from "@/components/AnalyticsSection";
 
 /**
  * Main dashboard page — shows stats, live geofence map, fraud alerts, employees, and logs.
@@ -19,12 +22,16 @@ export default async function DashboardPage() {
     .select("*")
     .order("created_at", { ascending: false });
 
-  // 2. Fetch attendance logs with employee details
-  const { data: attendanceLogs } = await supabase
+  // 2. Fetch attendance logs with employee and site details
+  const { data: attendanceLogs, error: attendanceError } = await supabase
     .from("attendance_logs")
-    .select("*, employees(first_name, last_name, email)")
+    .select("*, employees(first_name, last_name, email, employee_code, avatar_url), sites(name, address)")
     .order("checked_at", { ascending: false })
     .limit(100);
+
+  if (attendanceError) {
+    console.error("Error fetching attendance logs:", attendanceError);
+  }
 
   // 3. Fetch active sites for geofence map
   const { data: sites } = await supabase
@@ -78,6 +85,14 @@ export default async function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center space-x-3">
+          <Link
+            href="/kiosk"
+            target="_blank"
+            className="inline-flex items-center space-x-2 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
+            title="Launch full-screen entrance reception kiosk"
+          >
+            <span>🖥️ Launch Kiosk Mode</span>
+          </Link>
           <TimesheetExportButton />
         </div>
       </div>
@@ -109,6 +124,12 @@ export default async function DashboardPage() {
       {/* Fraud & Security Alert Banner */}
       <FraudAlertsList initialAlerts={fraudAlerts || []} />
 
+      {/* Workforce & Biometrics Analytics */}
+      <AnalyticsSection
+        logs={attendanceLogs || []}
+        employees={employees || []}
+      />
+
       {/* Interactive Site Geofence Map */}
       <SiteGeofenceMap
         sites={sites || []}
@@ -117,6 +138,9 @@ export default async function DashboardPage() {
 
       {/* Employees Table */}
       <EmployeeTable employees={employees || []} />
+
+      {/* Automated Shift Timesheets & Payroll Hours */}
+      <TimesheetSection logs={attendanceLogs || []} />
 
       {/* Attendance Logs Table */}
       <AttendanceTable logs={attendanceLogs || []} />

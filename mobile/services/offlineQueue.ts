@@ -1,243 +1,276 @@
-import * as FileSystem from "expo-file-system/legacy";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system/legacy";
 import NetInfo from "@react-native-community/netinfo";
-import * as Crypto from "expo-crypto";
 import { checkIn, checkOut } from "./api";
-import { getDeviceFingerprint } from "./device";
 
-const QUEUE_STORAGE_KEY = "facepass_offline_attendance_queue_v1";
-const QUEUE_DIR = `${FileSystem.documentDirectory}facepass_queue/`;
-
-export interface QueuedAttendance {
-  clientUuid: string;
-  photoFilePath: string;
+export interface QueuedAttendanceRecord {
+  id: string;
+  imageUri: string;
   latitude: number;
   longitude: number;
   checkType: "check_in" | "check_out";
-  timestamp: string;
-  deviceFingerprint: string;
   challengeId?: string;
-  retryCount: number;
+  deviceFingerprint?: string;
+  timestamp: string; // ISO string when the punch happened offline
+  attempts: number;
+  status: "pending" | "syncing" | "failed";
   lastError?: string;
 }
 
+const STORAGE_KEY = "@facepass_offline_queue_v1";
+const OFFLINE_DIR = `${FileSystem.documentDirectory}facepass_offline/`;
+
+type CountListener = (count: number) => void;
+const countListeners: Set<CountListener> = new Set();
+
+let isSyncing = false;
+
+function notifyListeners(count: number) {
+  countListeners.forEach((listener) => {
+    try {
+      listener(count);
+    } catch (e) {
+      console.warn("Queue listener notification note:", e);
+    }
+  });
+}
+
 /**
- * Ensure queue directory exists.
+ * Ensure the offline punch directory exists.
  */
-async function ensureDirectoryExists(): Promise<void> {
-  const dirInfo = await FileSystem.getInfoAsync(QUEUE_DIR);
-  if (!dirInfo.exists) {
-    await FileSystem.makeDirectoryAsync(QUEUE_DIR, { intermediates: true });
+async function ensureDirExists() {
+  try {
+    const dirInfo = await FileSystem.getInfoAsync(OFFLINE_DIR);
+    if (!dirInfo.exists) {
+      await FileSystem.makeDirectoryAsync(OFFLINE_DIR, { intermediates: true });
+    }
+  } catch (err) {
+    console.warn("Could not create offline dir:", err);
   }
 }
 
 /**
- * Get all queued check-in records from storage.
+ * Get all queued punches from local storage.
  */
-export async function getQueuedItems(): Promise<QueuedAttendance[]> {
+export async function getQueuedRecords(): Promise<QueuedAttendanceRecord[]> {
   try {
-    const raw = await AsyncStorage.getItem(QUEUE_STORAGE_KEY);
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     return JSON.parse(raw);
   } catch (err) {
-    console.error("Failed to read offline queue:", err);
+    console.error("Error reading offline queue:", err);
     return [];
   }
 }
 
 /**
- * Save updated queue items to storage.
- */
-async function saveQueueItems(items: QueuedAttendance[]): Promise<void> {
-  await AsyncStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(items));
-}
-
-/**
- * Get current count of pending offline records.
+ * Get number of queued punches.
  */
 export async function getQueueCount(): Promise<number> {
-  const items = await getQueuedItems();
-  return items.length;
+  const records = await getQueuedRecords();
+  return records.length;
 }
 
 /**
- * Save an attendance record locally when network is unavailable.
- *
- * Saves the photo to disk and queues the metadata with a persistent client UUID.
+ * Enqueue an attendance punch offline.
  */
 export async function enqueueAttendance(
-  imageBase64: string,
+  imageInput: string,
   latitude: number,
   longitude: number,
   checkType: "check_in" | "check_out" = "check_in",
-  challengeId?: string
-): Promise<QueuedAttendance> {
-  await ensureDirectoryExists();
+  challengeId?: string,
+  deviceFingerprint?: string
+): Promise<QueuedAttendanceRecord> {
+  await ensureDirExists();
 
-  const clientUuid = Crypto.randomUUID();
-  const photoFilePath = `${QUEUE_DIR}${clientUuid}.jpg`;
+  const id = `fp_off_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  const filePath = `${OFFLINE_DIR}${id}.jpg`;
 
-  // Write base64 image to local disk file
-  await FileSystem.writeAsStringAsync(photoFilePath, imageBase64, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+  // Save image to durable local storage
+  if (imageInput.startsWith("data:image/") || imageInput.length > 500) {
+    const cleanBase64 = imageInput.replace(/^data:image\/[a-z]+;base64,/, "");
+    await FileSystem.writeAsStringAsync(filePath, cleanBase64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  } else if (imageInput.startsWith("file://")) {
+    await FileSystem.copyAsync({
+      from: imageInput,
+      to: filePath,
+    });
+  } else {
+    await FileSystem.writeAsStringAsync(filePath, imageInput, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  }
 
-  const deviceFingerprint = await getDeviceFingerprint();
-
-  const item: QueuedAttendance = {
-    clientUuid,
-    photoFilePath,
+  const record: QueuedAttendanceRecord = {
+    id,
+    imageUri: filePath,
     latitude,
     longitude,
     checkType,
-    timestamp: new Date().toISOString(),
+    challengeId: challengeId || "passive-subsecond",
     deviceFingerprint,
-    challengeId,
-    retryCount: 0,
+    timestamp: new Date().toISOString(),
+    attempts: 0,
+    status: "pending",
   };
 
-  const queue = await getQueuedItems();
-  queue.push(item);
-  await saveQueueItems(queue);
+  const current = await getQueuedRecords();
+  const updated = [...current, record];
+  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
 
-  return item;
+  notifyListeners(updated.length);
+
+  // Attempt sync in background if online
+  flushQueue().catch(() => {});
+
+  return record;
 }
 
 /**
- * Process and flush the offline queue, uploading items to the backend.
+ * Remove a punch from the queue after successful upload.
  */
-let isFlushing = false;
+async function removeRecord(recordId: string, imageUri: string) {
+  try {
+    await FileSystem.deleteAsync(imageUri, { idempotent: true });
+  } catch (_) {}
 
-export async function flushQueue(
-  onProgress?: (synced: number, total: number) => void
-): Promise<{ synced: number; failed: number }> {
-  if (isFlushing) {
-    return { synced: 0, failed: 0 };
+  const current = await getQueuedRecords();
+  const updated = current.filter((r) => r.id !== recordId);
+  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  notifyListeners(updated.length);
+}
+
+/**
+ * Clear the entire offline queue (e.g. discarding stale records).
+ */
+export async function clearOfflineQueue(): Promise<void> {
+  const records = await getQueuedRecords();
+  for (const r of records) {
+    try {
+      await FileSystem.deleteAsync(r.imageUri, { idempotent: true });
+    } catch (_) {}
+  }
+  await AsyncStorage.removeItem(STORAGE_KEY);
+  notifyListeners(0);
+}
+
+/**
+ * Flush and upload all queued attendance records to the FacePass cloud.
+ */
+export async function flushQueue(): Promise<{ synced: number; failed: number }> {
+  if (isSyncing) {
+    const q = await getQueuedRecords();
+    return { synced: 0, failed: q.length };
   }
 
   const net = await NetInfo.fetch();
-  if (!net.isConnected || !net.isInternetReachable) {
-    return { synced: 0, failed: 0 };
+  if (!net.isConnected) {
+    const q = await getQueuedRecords();
+    return { synced: 0, failed: q.length };
   }
 
-  isFlushing = true;
+  isSyncing = true;
   let synced = 0;
   let failed = 0;
 
   try {
-    const queue = await getQueuedItems();
+    const queue = await getQueuedRecords();
     if (queue.length === 0) {
+      isSyncing = false;
       return { synced: 0, failed: 0 };
     }
 
-    const remainingItems: QueuedAttendance[] = [];
-
-    for (let i = 0; i < queue.length; i++) {
-      const item = queue[i];
-
+    for (const item of queue) {
       try {
-        // Read photo file from disk
-        const fileExists = await FileSystem.getInfoAsync(item.photoFilePath);
-        if (!fileExists.exists) {
-          // File missing, cannot retry
-          continue;
-        }
-
-        // Use local file URI directly so React Native streams the file natively
-        const photoUri = item.photoFilePath.startsWith("file://")
-          ? item.photoFilePath
-          : `file://${item.photoFilePath}`;
-
         if (item.checkType === "check_in") {
           await checkIn(
-            photoUri,
+            item.imageUri,
             item.latitude,
             item.longitude,
             item.challengeId,
             item.deviceFingerprint,
-            item.clientUuid
+            item.id,
+            item.timestamp
           );
         } else {
           await checkOut(
-            photoUri,
+            item.imageUri,
             item.latitude,
             item.longitude,
             item.challengeId,
-            item.clientUuid
+            item.id,
+            item.deviceFingerprint,
+            item.timestamp
           );
         }
 
-        // Successfully synced: delete local image file
-        await FileSystem.deleteAsync(item.photoFilePath, { idempotent: true });
+        await removeRecord(item.id, item.imageUri);
         synced++;
-        if (onProgress) onProgress(synced, queue.length);
       } catch (err: any) {
-        const errorDetail = err.response?.data?.detail || err.message;
-        console.warn(`Failed to sync queued item ${item.clientUuid}: ${errorDetail}`);
-        failed++;
-        item.retryCount += 1;
-        item.lastError = typeof errorDetail === "string" ? errorDetail : JSON.stringify(errorDetail);
+        console.warn(`Sync failed for offline record ${item.id}:`, err?.message || err);
 
-        // If client error (4xx like 400 Bad Request, 401 Unauthorized, 404 Not Found),
-        // or if retry count >= 3, purge from queue and remove local file to prevent infinite retry loops.
-        const isClientError =
-          err.response?.status >= 400 &&
-          err.response?.status < 500 &&
-          err.response?.status !== 408 &&
-          err.response?.status !== 429;
-
-        if (isClientError || item.retryCount >= 3) {
-          console.warn(`Purging unrecoverable queued item ${item.clientUuid} (${item.lastError})`);
-          try {
-            await FileSystem.deleteAsync(item.photoFilePath, { idempotent: true });
-          } catch (_) {}
-        } else {
-          remainingItems.push(item);
+        // If server indicates already checked in/out or 409 duplicate
+        if (err?.response?.status === 409 || err?.message?.includes("already")) {
+          await removeRecord(item.id, item.imageUri);
+          synced++;
+          continue;
         }
+
+        // If network connectivity dropped, stop sync loop
+        if (err?.isNetworkError || !err?.response) {
+          failed++;
+          break;
+        }
+
+        // Increment attempts on non-network errors
+        item.attempts += 1;
+        item.status = "failed";
+        item.lastError = err?.message || "Sync error";
+        const current = await getQueuedRecords();
+        const updated = current.map((r) => (r.id === item.id ? item : r));
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        failed++;
       }
     }
-
-    await saveQueueItems(remainingItems);
   } finally {
-    isFlushing = false;
+    isSyncing = false;
   }
+
+  const currentCount = await getQueueCount();
+  notifyListeners(currentCount);
 
   return { synced, failed };
 }
 
 /**
- * Initialize automatic background sync when network connectivity is restored.
+ * Subscribe to offline queue count changes and auto-sync on connectivity return.
  */
-export function initOfflineSyncListener(
-  onQueueUpdate?: (count: number) => void
-): () => void {
-  const unsubscribe = NetInfo.addEventListener(async (state) => {
+export function initOfflineSyncListener(onCountChange: (count: number) => void): () => void {
+  countListeners.add(onCountChange);
+
+  // Initial count
+  getQueueCount().then(onCountChange).catch(() => {});
+
+  // Listen to network state transitions
+  const unsubscribeNet = NetInfo.addEventListener((state) => {
     if (state.isConnected && state.isInternetReachable) {
-      const count = await getQueueCount();
-      if (count > 0) {
-        await flushQueue();
-        if (onQueueUpdate) {
-          const newCount = await getQueueCount();
-          onQueueUpdate(newCount);
-        }
-      }
+      flushQueue()
+        .then(() => getQueueCount().then(onCountChange))
+        .catch(() => {});
     }
   });
 
-  return unsubscribe;
+  return () => {
+    countListeners.delete(onCountChange);
+    unsubscribeNet();
+  };
 }
 
-/**
- * Purge all items from the offline queue and clean up local images.
- */
-export async function clearOfflineQueue(): Promise<void> {
-  try {
-    const queue = await getQueuedItems();
-    for (const item of queue) {
-      await FileSystem.deleteAsync(item.photoFilePath, { idempotent: true });
-    }
-  } catch (e) {
-    console.warn("Error deleting queue files:", e);
-  }
-  await AsyncStorage.removeItem(QUEUE_STORAGE_KEY);
-}
+// Aliases for compatibility
+export const enqueuePunch = enqueueAttendance;
+export const getQueuedPunches = getQueuedRecords;
+export const syncQueue = flushQueue;
+export const initOfflineQueue = initOfflineSyncListener;

@@ -29,10 +29,16 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh the auth token
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Refresh the auth token safely
+  let user = null;
+  try {
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+    user = authUser;
+  } catch {
+    user = null;
+  }
 
   // Protect dashboard routes
   if (!user && request.nextUrl.pathname.startsWith("/dashboard")) {

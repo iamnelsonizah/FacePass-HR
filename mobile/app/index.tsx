@@ -10,8 +10,9 @@ import {
   ActivityIndicator,
   Image,
   Platform,
+  Linking,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { signOut } from "../services/auth";
@@ -21,6 +22,7 @@ import {
   getLivenessChallenge,
   getProfile,
   getMyAttendanceHistory,
+  getActiveSites,
 } from "../services/api";
 import {
   getCurrentLocation,
@@ -32,6 +34,7 @@ import {
   enqueueAttendance,
   getQueueCount,
   flushQueue,
+  clearOfflineQueue,
   initOfflineSyncListener,
 } from "../services/offlineQueue";
 import {
@@ -52,13 +55,15 @@ import LivenessChallenge from "../components/LivenessChallenge";
 import TimesheetHistory from "../components/TimesheetHistory";
 import KioskScanner from "../components/KioskScanner";
 import ProfileEditModal from "../components/ProfileEditModal";
+import PremiumFaceIdIcon from "../components/PremiumFaceIdIcon";
 
 type CheckMode = "check_in" | "check_out" | null;
 type TabType = "home" | "attendance" | "history" | "profile";
 
 export default function HomeScreen() {
   const router = useRouter();
-  const [userName, setUserName] = useState("Nelson Izah");
+  const insets = useSafeAreaInsets();
+  const [userName, setUserName] = useState("");
   const [userProfile, setUserProfile] = useState<{
     first_name: string;
     last_name: string;
@@ -67,25 +72,29 @@ export default function HomeScreen() {
     employee_code?: string;
     avatar_url?: string | null;
   }>({
-    first_name: "Nelson",
-    last_name: "Izah",
-    email: "nelson@facepass.io",
+    first_name: "",
+    last_name: "",
+    email: "",
     phone: "",
-    employee_code: "FP-60948",
+    employee_code: "",
     avatar_url: null,
   });
 
-  const [isEnrolled, setIsEnrolled] = useState(true);
+  const [isEnrolled, setIsEnrolled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkMode, setCheckMode] = useState<CheckMode>(null);
+
   const [showCamera, setShowCamera] = useState(false);
   const [challenge, setChallenge] = useState<any>(null);
   const [showLiveness, setShowLiveness] = useState(false);
+  const [livenessMode, setLivenessMode] = useState<"passive" | "active">("passive");
   const [showTimesheet, setShowTimesheet] = useState(false);
   const [showKiosk, setShowKiosk] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>("home");
+
+  const [currentCoords, setCurrentCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
   const [siteDistance, setSiteDistance] = useState<{
     meters: number;
@@ -93,14 +102,14 @@ export default function HomeScreen() {
     siteName: string;
     siteCity: string;
   }>({
-    meters: 15,
-    isInside: true,
-    siteName: "FacePass Hub",
-    siteCity: "Verified Worksite",
+    meters: 0,
+    isInside: false,
+    siteName: "Locating worksite...",
+    siteCity: "Detecting location",
   });
 
   const [isCheckedIn, setIsCheckedIn] = useState(false);
-  const [checkInTime, setCheckInTime] = useState<string>("08:12 AM");
+  const [checkInTime, setCheckInTime] = useState<string>("");
   const [checkInDateObj, setCheckInDateObj] = useState<Date | null>(null);
   const [shiftDuration, setShiftDuration] = useState<string>("");
 
@@ -121,10 +130,10 @@ export default function HomeScreen() {
   const [biometricsActive, setBiometricsActive] = useState<boolean>(false);
   const [remindersActive, setRemindersActive] = useState<boolean>(false);
 
-  // Compute initials fallback (e.g. "NI" for Nelson Izah)
+  // Compute initials fallback
   const initials =
     `${userProfile.first_name?.[0] || ""}${userProfile.last_name?.[0] || ""}`.toUpperCase() ||
-    "NI";
+    (userName ? userName.slice(0, 2).toUpperCase() : "FP");
 
   // Real-time Shift Duration Timer
   useEffect(() => {
@@ -165,16 +174,16 @@ export default function HomeScreen() {
       const profile = await getProfile();
       if (profile) {
         setUserProfile({
-          first_name: profile.first_name || "Nelson",
-          last_name: profile.last_name || "Izah",
+          first_name: profile.first_name || "",
+          last_name: profile.last_name || "",
           email: profile.email || "",
           phone: profile.phone || "",
-          employee_code: profile.employee_code || "FP-60948",
+          employee_code: profile.employee_code || "",
           avatar_url: profile.avatar_url || null,
         });
-        if (profile.first_name) {
+        if (profile.first_name || profile.last_name) {
           setUserName(
-            `${profile.first_name} ${profile.last_name || ""}`.trim()
+            `${profile.first_name || ""} ${profile.last_name || ""}`.trim()
           );
         }
         if (profile.is_enrolled !== undefined) {
@@ -374,19 +383,60 @@ export default function HomeScreen() {
     try {
       const loc = await getCurrentLocation();
       const place = await getPlaceName(loc.latitude, loc.longitude);
+
+      // Fetch dynamic worksites from server
+      const sites = await getActiveSites();
+      let nearestDist = 0;
+      let isInside = true;
+      let matchedSiteName = place.siteName;
+
+      if (sites && sites.length > 0) {
+        let minDistance = Infinity;
+        let bestSite = sites[0];
+
+        for (const s of sites) {
+          const d = calculateDistance(loc.latitude, loc.longitude, s.latitude, s.longitude);
+          if (d < minDistance) {
+            minDistance = d;
+            bestSite = s;
+          }
+        }
+
+        nearestDist = minDistance;
+        isInside = minDistance <= (bestSite.radius_meters || 100);
+        if (isInside) {
+          matchedSiteName = bestSite.name || place.siteName;
+        }
+      }
+
+      setCurrentCoords({ latitude: loc.latitude, longitude: loc.longitude });
       setSiteDistance({
-        meters: 12,
-        isInside: true,
-        siteName: place.siteName,
+        meters: Math.round(nearestDist),
+        isInside,
+        siteName: matchedSiteName,
         siteCity: place.siteCity,
       });
-    } catch (e) {
-      setSiteDistance({
-        meters: 15,
-        isInside: true,
-        siteName: "Victoria Island HQ",
-        siteCity: "Lagos, Nigeria",
+    } catch (e: any) {
+      console.log("Proximity check note:", e?.message || e);
+      setSiteDistance((prev) => ({
+        ...prev,
+        isInside: false,
+        siteName: prev.siteName !== "Locating worksite..." ? prev.siteName : "Location Unavailable",
+        siteCity: "Please enable GPS",
+      }));
+    }
+  };
+
+  const openLocationOnMap = (lat?: number, lng?: number) => {
+    const targetLat = lat || currentCoords?.latitude;
+    const targetLng = lng || currentCoords?.longitude;
+    if (targetLat && targetLng) {
+      const url = `https://maps.google.com/?q=${targetLat},${targetLng}`;
+      Linking.openURL(url).catch(() => {
+        Alert.alert("Map Error", "Could not open map viewer.");
       });
+    } else {
+      Alert.alert("Location", "Acquiring GPS location. Please ensure location services are enabled.");
     }
   };
 
@@ -400,10 +450,28 @@ export default function HomeScreen() {
     try {
       const { synced, failed } = await flushQueue();
       await refreshQueueCount();
-      Alert.alert(
-        "Sync Complete",
-        `Synced: ${synced} record(s)${failed > 0 ? `\nFailed: ${failed} (will retry)` : ""}`
-      );
+      if (failed > 0) {
+        Alert.alert(
+          "Sync Notice",
+          `Synced: ${synced} record(s)\nFailed: ${failed} (will retry)\n\nThe failed record may have been captured before face enrollment.`,
+          [
+            { text: "Keep in Queue", style: "cancel" },
+            {
+              text: "Discard Stale Record",
+              style: "destructive",
+              onPress: async () => {
+                await clearOfflineQueue();
+                await refreshQueueCount();
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert(
+          "Sync Complete",
+          `Synced: ${synced} record(s)`
+        );
+      }
     } catch (err: any) {
       Alert.alert("Sync Error", err.message || "Failed to sync offline queue");
     } finally {
@@ -425,6 +493,17 @@ export default function HomeScreen() {
     }
 
     setCheckMode(mode);
+
+    if (livenessMode === "passive") {
+      // Sub-Second Passive Liveness: immediate camera launch with 0ms pre-fetch latency!
+      setChallenge({
+        challenge_id: "passive-subsecond",
+        challenge_type: "passive",
+        instruction: "Align your face in the biometric oval",
+      });
+      setShowLiveness(true);
+      return;
+    }
 
     try {
       const challengeData = await getLivenessChallenge();
@@ -458,7 +537,8 @@ export default function HomeScreen() {
   ) => {
     setLoading(true);
 
-    let location = { latitude: 6.4281, longitude: 3.4219 };
+    // Fallback coordinates default to Marrakesh Hub (31.6393, -8.0096)
+    let location = { latitude: 31.6393467, longitude: -8.0095983 };
     try {
       location = await getCurrentLocation();
     } catch (locErr: any) {
@@ -516,50 +596,73 @@ export default function HomeScreen() {
       );
       loadActivityHistory();
     } catch (networkError: any) {
-      console.log("Network error during check, queueing offline:", networkError.message);
+      // Determine whether this is a genuine network failure or a server error.
+      // api.ts XHR handler sets `.isNetworkError = true` on connectivity failures
+      // and `.isTimeout = true` on timeouts. Server HTTP errors (4xx/5xx) have
+      // `.response` populated with the real error detail.
+      const isGenuineNetworkFailure =
+        networkError.isNetworkError === true || networkError.isTimeout === true;
 
-      const now = new Date();
-      const timeFormatted = now.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      });
-
-      try {
-        await enqueueAttendance(
-          base64Image,
-          location.latitude,
-          location.longitude,
-          checkMode || "check_in",
-          challengeId
-        );
-        await refreshQueueCount();
-
-        if (checkMode === "check_in") {
-          setIsCheckedIn(true);
-          setCheckInDateObj(now);
-          setCheckInTime(timeFormatted);
-          setTodayLogs((prev) => ({
-            ...prev,
-            checkInTime: timeFormatted,
-            verifyTime: timeFormatted,
-            checkOutTime: null,
-          }));
-        } else {
-          setIsCheckedIn(false);
-          setTodayLogs((prev) => ({
-            ...prev,
-            checkOutTime: timeFormatted,
-          }));
-        }
-
+      if (!isGenuineNetworkFailure && networkError.response) {
+        // Server returned a real HTTP error — show it to the user.
+        const serverMsg =
+          networkError.response?.data?.detail ||
+          networkError.response?.data?.message ||
+          networkError.message ||
+          "An unexpected error occurred. Please try again.";
+        console.log("Server error during check:", networkError.response?.status, serverMsg);
         Alert.alert(
-          "Saved Offline 📱",
-          "Your punch has been stored securely and will sync automatically when online.",
+          `${checkMode === "check_in" ? "Check-in" : "Check-out"} Failed`,
+          String(serverMsg),
           [{ text: "OK" }]
         );
-      } catch (queueErr: any) {
-        Alert.alert("Error", "Could not record attendance offline: " + queueErr.message);
+      } else {
+        // Genuine network failure — queue offline only if truly disconnected.
+        console.log("Network error during check, queueing offline:", networkError.message);
+
+        const now = new Date();
+        const timeFormatted = now.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        });
+
+        try {
+          await enqueueAttendance(
+            base64Image,
+            location.latitude,
+            location.longitude,
+            checkMode || "check_in",
+            challengeId
+          );
+          await refreshQueueCount();
+
+          if (checkMode === "check_in") {
+            setIsCheckedIn(true);
+            setCheckInDateObj(now);
+            setCheckInTime(timeFormatted);
+            setTodayLogs((prev) => ({
+              ...prev,
+              checkInTime: timeFormatted,
+              verifyTime: timeFormatted,
+              checkOutTime: null,
+            }));
+          } else {
+            setIsCheckedIn(false);
+            setTodayLogs((prev) => ({
+              ...prev,
+              checkOutTime: timeFormatted,
+            }));
+          }
+
+          Alert.alert(
+            "Saved Offline 📱",
+            "Your punch has been stored securely and will sync automatically when online.",
+            [{ text: "OK" }]
+          );
+        } catch (queueErr: any) {
+          Alert.alert("Error", "Could not record attendance offline: " + queueErr.message);
+        }
       }
     } finally {
       setLoading(false);
@@ -602,6 +705,7 @@ export default function HomeScreen() {
             <TouchableOpacity
               onPress={() => setShowProfileModal(true)}
               activeOpacity={0.8}
+              style={styles.avatarWrapper}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               {userProfile.avatar_url ? (
@@ -616,6 +720,8 @@ export default function HomeScreen() {
                   <Text style={styles.initialsText}>{initials}</Text>
                 </View>
               )}
+              {/* Online / Ready Hardware Badge */}
+              <View style={styles.avatarStatusBadge} />
             </TouchableOpacity>
 
             <View style={styles.nameBlock}>
@@ -630,7 +736,7 @@ export default function HomeScreen() {
             activeOpacity={0.7}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="settings-outline" size={22} color="#334155" />
+            <Ionicons name="settings-outline" size={20} color="#334155" />
           </TouchableOpacity>
         </View>
 
@@ -639,11 +745,16 @@ export default function HomeScreen() {
           {/* Left Column: Today & Check-in Status */}
           <View style={styles.statusColLeft}>
             <View style={styles.colHeaderRow}>
-              <Ionicons name="calendar-outline" size={15} color="#64748B" />
+              <Ionicons name="calendar-outline" size={14} color="#64748B" />
               <Text style={styles.colHeaderLabel}>Today</Text>
             </View>
 
-            <View style={styles.statusValueRow}>
+            <View
+              style={[
+                styles.statusPillBadge,
+                isCheckedIn ? styles.statusPillActive : styles.statusPillInactive,
+              ]}
+            >
               <View
                 style={[
                   styles.statusDot,
@@ -653,7 +764,7 @@ export default function HomeScreen() {
               <Text
                 style={[
                   styles.statusValueText,
-                  { color: isCheckedIn ? "#10B981" : "#EF4444" },
+                  { color: isCheckedIn ? "#059669" : "#DC2626" },
                 ]}
               >
                 {isCheckedIn ? "Checked in" : "Not checked in"}
@@ -666,21 +777,50 @@ export default function HomeScreen() {
           {/* Vertical Divider */}
           <View style={styles.cardDivider} />
 
-          {/* Right Column: Work Site & City */}
-          <View style={styles.statusColRight}>
+          {/* Right Column: Work Site & City with Tap to View on Map */}
+          <TouchableOpacity
+            style={styles.statusColRight}
+            onPress={() => openLocationOnMap()}
+            activeOpacity={0.7}
+          >
             <View style={styles.siteHeaderRow}>
-              <Ionicons name="location-outline" size={18} color="#334155" />
-              <Text style={styles.siteNameText}>{siteDistance.siteName}</Text>
+              <Ionicons name="location-outline" size={16} color="#0F172A" />
+              <Text style={styles.siteNameText} numberOfLines={1}>
+                {siteDistance.siteName}
+              </Text>
             </View>
-            <Text style={styles.siteAddressText}>{siteDistance.siteCity}</Text>
-          </View>
+            <Text style={styles.siteAddressText} numberOfLines={1}>
+              {siteDistance.siteCity}
+            </Text>
+            <View style={[styles.geofenceChip, !siteDistance.isInside && styles.geofenceChipOutside]}>
+              <Ionicons
+                name={siteDistance.isInside ? "shield-checkmark" : "location-outline"}
+                size={11}
+                color={siteDistance.isInside ? "#059669" : "#D97706"}
+              />
+              <Text style={[styles.geofenceChipText, !siteDistance.isInside && styles.geofenceChipTextOutside]}>
+                {siteDistance.isInside
+                  ? "Within Geofence"
+                  : siteDistance.meters > 0
+                  ? `${siteDistance.meters >= 1000 ? (siteDistance.meters / 1000).toFixed(1) + "km" : siteDistance.meters + "m"} away`
+                  : "Location acquired"}
+              </Text>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 3, marginTop: 4 }}>
+              <Ionicons name="map-outline" size={11} color="#2563EB" />
+              <Text style={{ fontSize: 10, color: "#2563EB", fontWeight: "600" }}>
+                View on Map ↗
+              </Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
         {/* Real-time Shift Duration Indicator */}
         {isCheckedIn && !!shiftDuration && (
           <View style={styles.shiftTimerRow}>
             <View style={styles.shiftTimerPill}>
-              <Ionicons name="timer-outline" size={14} color="#2563EB" />
+              <View style={styles.timerPulseDot} />
+              <Ionicons name="timer-outline" size={14} color="#1D4ED8" />
               <Text style={styles.shiftTimerText}>On Shift: {shiftDuration}</Text>
             </View>
           </View>
@@ -714,66 +854,99 @@ export default function HomeScreen() {
         <TouchableOpacity
           style={styles.checkInCard}
           onPress={() => startCheck("check_in")}
-          activeOpacity={0.88}
+          activeOpacity={0.9}
           disabled={loading}
         >
+          {/* Subtle Ambient Decorative Highlights */}
+          <View style={styles.cardGlowOrb1} pointerEvents="none" />
+          <View style={styles.cardGlowOrb2} pointerEvents="none" />
+          <View style={styles.cardRingAccent} pointerEvents="none" />
+
           {loading && checkMode === "check_in" ? (
-            <ActivityIndicator size="large" color="#FFFFFF" />
+            <View style={styles.cardLoadingRow}>
+              <ActivityIndicator size="small" color="#FFFFFF" />
+              <Text style={styles.cardLoadingText}>Starting biometric scan...</Text>
+            </View>
           ) : (
-            <>
-              <View style={styles.checkInCenter}>
-                <MaterialCommunityIcons
-                  name="face-recognition"
-                  size={50}
-                  color="#FFFFFF"
-                />
+            <View style={styles.checkInRow}>
+              {/* Left: Premium Face ID Biometric Icon Box */}
+              <View style={styles.checkInIconTile}>
+                <PremiumFaceIdIcon size={36} color="#FFFFFF" showLaser={true} />
+              </View>
+
+              {/* Middle: Title & Subtitle */}
+              <View style={styles.checkInTextGroup}>
                 <Text style={styles.checkInTitle}>Check In</Text>
                 <Text style={styles.checkInSubtitle}>
                   Face verification + location
                 </Text>
               </View>
 
-              <View style={styles.cardRightArrow}>
-                <Ionicons name="arrow-forward" size={24} color="#FFFFFF" />
+              {/* Right: Circular Arrow Action Button */}
+              <View style={styles.cardRightCircle}>
+                <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
               </View>
-            </>
+            </View>
           )}
         </TouchableOpacity>
 
         {/* Secondary Action Card: Check Out */}
         <TouchableOpacity
-          style={styles.checkOutCard}
+          style={[styles.checkOutCard, isCheckedIn && styles.checkOutCardActive]}
           onPress={() => startCheck("check_out")}
           activeOpacity={0.85}
           disabled={loading}
         >
           {loading && checkMode === "check_out" ? (
-            <ActivityIndicator size="small" color="#2563EB" />
+            <View style={styles.cardLoadingRow}>
+              <ActivityIndicator size="small" color="#2563EB" />
+              <Text style={[styles.cardLoadingText, { color: "#2563EB" }]}>
+                Processing check-out...
+              </Text>
+            </View>
           ) : (
             <>
               <View style={styles.checkOutLeft}>
-                <View style={styles.checkOutIconBox}>
-                  <Ionicons name="exit-outline" size={26} color="#2563EB" />
+                <View
+                  style={[
+                    styles.checkOutIconBox,
+                    isCheckedIn && styles.checkOutIconBoxActive,
+                  ]}
+                >
+                  <Ionicons
+                    name="exit-outline"
+                    size={24}
+                    color={isCheckedIn ? "#2563EB" : "#64748B"}
+                  />
                 </View>
 
                 <View style={styles.checkOutTextGroup}>
                   <Text style={styles.checkOutTitle}>Check Out</Text>
                   <Text style={styles.checkOutSubtitle}>
-                    Record departure from work site
+                    {isCheckedIn
+                      ? "Complete work shift & punch out"
+                      : "Record departure from work site"}
                   </Text>
                 </View>
               </View>
 
-              <Ionicons name="arrow-forward" size={20} color="#2563EB" />
+              <View style={styles.checkOutArrowBox}>
+                <Ionicons name="arrow-forward" size={18} color="#64748B" />
+              </View>
             </>
           )}
         </TouchableOpacity>
 
         {/* Today's Activity Section */}
         <View style={styles.activitySection}>
-          <Text style={styles.activitySectionTitle}>Today's activity</Text>
+          <View style={styles.activityHeaderRow}>
+            <Text style={styles.activitySectionTitle}>Today's activity</Text>
+            <View style={styles.activityLivePill}>
+              <Text style={styles.activityLiveText}>Timeline</Text>
+            </View>
+          </View>
 
-          <View style={styles.timelineContainer}>
+          <View style={styles.timelineCard}>
             {/* Step 1: Check In */}
             <View style={styles.timelineItem}>
               <View style={styles.timelineIconColumn}>
@@ -785,11 +958,16 @@ export default function HomeScreen() {
                 >
                   <Ionicons
                     name={isCheckedIn || todayLogs.checkInTime ? "checkmark" : "time-outline"}
-                    size={18}
-                    color={isCheckedIn || todayLogs.checkInTime ? "#FFFFFF" : "#64748B"}
+                    size={16}
+                    color={isCheckedIn || todayLogs.checkInTime ? "#059669" : "#64748B"}
                   />
                 </View>
-                <View style={styles.timelineLine} />
+                <View
+                  style={[
+                    styles.timelineLine,
+                    (isCheckedIn || todayLogs.checkInTime) && styles.timelineLineDone,
+                  ]}
+                />
               </View>
 
               <View style={styles.timelineContent}>
@@ -800,12 +978,16 @@ export default function HomeScreen() {
                   </Text>
                 </View>
 
-                <View style={styles.timelineLocationGroup}>
-                  <Ionicons name="location-sharp" size={14} color="#64748B" />
-                  <Text style={styles.timelineLocationText}>
-                    {siteDistance.siteName}
+                <TouchableOpacity
+                  style={styles.timelineLocationBadge}
+                  onPress={() => openLocationOnMap()}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="location-sharp" size={12} color="#2563EB" />
+                  <Text style={[styles.timelineLocationBadgeText, { color: "#2563EB", fontWeight: "600" }]}>
+                    {siteDistance.siteName} 🗺️
                   </Text>
-                </View>
+                </TouchableOpacity>
               </View>
             </View>
 
@@ -819,9 +1001,9 @@ export default function HomeScreen() {
                   ]}
                 >
                   <Ionicons
-                    name={isCheckedIn || todayLogs.verifyTime ? "location-sharp" : "location-outline"}
-                    size={16}
-                    color={isCheckedIn || todayLogs.verifyTime ? "#FFFFFF" : "#64748B"}
+                    name={isCheckedIn || todayLogs.verifyTime ? "shield-checkmark" : "location-outline"}
+                    size={15}
+                    color={isCheckedIn || todayLogs.verifyTime ? "#2563EB" : "#64748B"}
                   />
                 </View>
                 <View style={styles.timelineLine} />
@@ -835,9 +1017,9 @@ export default function HomeScreen() {
                   </Text>
                 </View>
 
-                <View style={styles.timelineLocationGroup}>
-                  <Ionicons name="shield-checkmark" size={14} color="#2563EB" />
-                  <Text style={[styles.timelineLocationText, { color: "#2563EB" }]}>
+                <View style={styles.timelineVerifiedBadge}>
+                  <Ionicons name="shield-checkmark" size={12} color="#2563EB" />
+                  <Text style={styles.timelineVerifiedText}>
                     Geofence Verified
                   </Text>
                 </View>
@@ -845,18 +1027,34 @@ export default function HomeScreen() {
             </View>
 
             {/* Step 3: Check Out */}
-            <View style={styles.timelineItem}>
+            <View style={[styles.timelineItem, { marginBottom: 0 }]}>
               <View style={styles.timelineIconColumn}>
                 <View
                   style={[
                     styles.timelineNode,
-                    todayLogs.checkOutTime ? styles.nodeGreen : styles.nodeGray,
+                    todayLogs.checkOutTime
+                      ? styles.nodeGreen
+                      : isCheckedIn
+                      ? styles.nodeAmber
+                      : styles.nodeGray,
                   ]}
                 >
                   <Ionicons
-                    name={todayLogs.checkOutTime ? "checkmark" : "exit-outline"}
-                    size={18}
-                    color={todayLogs.checkOutTime ? "#FFFFFF" : "#64748B"}
+                    name={
+                      todayLogs.checkOutTime
+                        ? "checkmark"
+                        : isCheckedIn
+                        ? "time-outline"
+                        : "exit-outline"
+                    }
+                    size={16}
+                    color={
+                      todayLogs.checkOutTime
+                        ? "#059669"
+                        : isCheckedIn
+                        ? "#D97706"
+                        : "#64748B"
+                    }
                   />
                 </View>
               </View>
@@ -879,7 +1077,14 @@ export default function HomeScreen() {
       </ScrollView>
 
       {/* Bottom Tab Bar Navigation */}
-      <View style={styles.bottomTabBar}>
+      <View
+        style={[
+          styles.bottomTabBar,
+          {
+            paddingBottom: Math.max(insets.bottom, Platform.OS === "ios" ? 22 : 12) + 6,
+          },
+        ]}
+      >
         <TouchableOpacity
           style={styles.tabItem}
           onPress={() => setActiveTab("home")}
@@ -888,7 +1093,7 @@ export default function HomeScreen() {
         >
           <Ionicons
             name="home"
-            size={24}
+            size={22}
             color={activeTab === "home" ? "#2563EB" : "#94A3B8"}
           />
           <Text
@@ -899,6 +1104,7 @@ export default function HomeScreen() {
           >
             Home
           </Text>
+          {activeTab === "home" && <View style={styles.tabActiveIndicator} />}
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -910,9 +1116,8 @@ export default function HomeScreen() {
           activeOpacity={0.7}
           hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
         >
-          <MaterialCommunityIcons
-            name="face-recognition"
-            size={24}
+          <PremiumFaceIdIcon
+            size={22}
             color={activeTab === "attendance" ? "#2563EB" : "#94A3B8"}
           />
           <Text
@@ -923,6 +1128,7 @@ export default function HomeScreen() {
           >
             Attendance
           </Text>
+          {activeTab === "attendance" && <View style={styles.tabActiveIndicator} />}
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -935,8 +1141,8 @@ export default function HomeScreen() {
           hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
         >
           <Ionicons
-            name="time-outline"
-            size={24}
+            name="receipt-outline"
+            size={22}
             color={activeTab === "history" ? "#2563EB" : "#94A3B8"}
           />
           <Text
@@ -947,6 +1153,7 @@ export default function HomeScreen() {
           >
             History
           </Text>
+          {activeTab === "history" && <View style={styles.tabActiveIndicator} />}
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -960,7 +1167,7 @@ export default function HomeScreen() {
         >
           <Ionicons
             name="person-outline"
-            size={24}
+            size={22}
             color={activeTab === "profile" ? "#2563EB" : "#94A3B8"}
           />
           <Text
@@ -971,6 +1178,7 @@ export default function HomeScreen() {
           >
             Profile
           </Text>
+          {activeTab === "profile" && <View style={styles.tabActiveIndicator} />}
         </TouchableOpacity>
       </View>
 
@@ -1166,7 +1374,10 @@ export default function HomeScreen() {
       {/* Timesheet History Modal */}
       <Modal visible={showTimesheet} animationType="slide">
         <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
-          <TimesheetHistory onClose={() => setShowTimesheet(false)} />
+          <TimesheetHistory
+            onClose={() => setShowTimesheet(false)}
+            userProfile={userProfile}
+          />
         </SafeAreaView>
       </Modal>
 
@@ -1199,9 +1410,10 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
           <LivenessChallenge
-            challengeType={challenge?.challenge_type || "blink"}
-            instruction={challenge?.instruction || "Please blink naturally"}
-            challengeId={challenge?.challenge_id || "fallback-id"}
+            challengeType={challenge?.challenge_type || (livenessMode === "passive" ? "passive" : "blink")}
+            instruction={challenge?.instruction || (livenessMode === "passive" ? "Align your face in the biometric oval" : "Please blink naturally")}
+            challengeId={challenge?.challenge_id || (livenessMode === "passive" ? "passive-subsecond" : "fallback-id")}
+            isPassive={livenessMode === "passive"}
             onComplete={handleLivenessComplete}
             onCancel={() => {
               setShowLiveness(false);
@@ -1260,6 +1472,42 @@ const styles = StyleSheet.create({
     gap: 12,
     flex: 1,
   },
+  avatarWrapper: {
+    position: "relative",
+  },
+  avatarImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#E2E8F0",
+  },
+  initialsBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#064E3B",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#D1FAE5",
+  },
+  initialsText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  avatarStatusBadge: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
+    backgroundColor: "#10B981",
+    borderWidth: 2.5,
+    borderColor: "#FFFFFF",
+  },
   nameBlock: {
     justifyContent: "center",
   },
@@ -1269,7 +1517,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   userNameText: {
-    fontSize: 20,
+    fontSize: 21,
     fontWeight: "800",
     color: "#0F172A",
     marginTop: 1,
@@ -1279,36 +1527,19 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E2E8F0",
     justifyContent: "center",
     alignItems: "center",
-  },
-  avatarImage: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "#E2E8F0",
-  },
-  initialsBadge: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "#1E3A8A",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#DBEAFE",
-  },
-  initialsText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "800",
-    letterSpacing: 0.5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
   shiftTimerRow: {
-    marginTop: 10,
+    marginTop: 12,
     alignItems: "flex-start",
   },
   shiftTimerPill: {
@@ -1322,6 +1553,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     gap: 6,
   },
+  timerPulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#1D4ED8",
+  },
   shiftTimerText: {
     fontSize: 12,
     fontWeight: "700",
@@ -1331,15 +1568,15 @@ const styles = StyleSheet.create({
   // Dual-Column Status & Site Card
   statusCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#EEF2F6",
-    padding: 16,
+    borderColor: "#E2E8F0",
+    padding: 18,
     flexDirection: "row",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
     elevation: 2,
   },
   statusColLeft: {
@@ -1348,38 +1585,53 @@ const styles = StyleSheet.create({
   colHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 6,
   },
   colHeaderLabel: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#64748B",
-    fontWeight: "500",
-    marginLeft: 6,
+    fontWeight: "600",
   },
-  statusValueRow: {
+  statusPillBadge: {
     flexDirection: "row",
     alignItems: "center",
+    alignSelf: "flex-start",
+    paddingVertical: 4,
+    paddingHorizontal: 9,
+    borderRadius: 8,
     marginTop: 8,
+    marginBottom: 4,
+  },
+  statusPillActive: {
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  statusPillInactive: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FEE2E2",
   },
   statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 7,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    marginRight: 6,
   },
   statusValueText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "700",
   },
   statusDateText: {
     fontSize: 12,
     color: "#94A3B8",
-    marginTop: 4,
     fontWeight: "500",
+    marginTop: 2,
   },
   cardDivider: {
     width: 1,
-    backgroundColor: "#EEF2F6",
-    marginHorizontal: 16,
+    backgroundColor: "#F1F5F9",
+    marginHorizontal: 14,
   },
   statusColRight: {
     flex: 1,
@@ -1388,18 +1640,37 @@ const styles = StyleSheet.create({
   siteHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 5,
   },
   siteNameText: {
     fontSize: 15,
     fontWeight: "700",
     color: "#0F172A",
-    marginLeft: 6,
+    flexShrink: 1,
   },
   siteAddressText: {
     fontSize: 12,
     color: "#64748B",
-    marginTop: 4,
-    marginLeft: 24,
+    marginTop: 2,
+    marginLeft: 21,
+  },
+  geofenceChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 6,
+    marginLeft: 21,
+  },
+  geofenceChipOutside: {
+    opacity: 0.9,
+  },
+  geofenceChipText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#059669",
+  },
+  geofenceChipTextOutside: {
+    color: "#D97706",
   },
 
   // Sync Banner
@@ -1433,74 +1704,147 @@ const styles = StyleSheet.create({
 
   // Check In Card (Primary)
   checkInCard: {
-    marginTop: 16,
-    backgroundColor: "#2563EB",
-    borderRadius: 20,
-    paddingVertical: 28,
+    marginTop: 18,
+    backgroundColor: "#1D4ED8",
+    borderRadius: 22,
+    paddingVertical: 22,
     paddingHorizontal: 20,
     position: "relative",
-    shadowColor: "#2563EB",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 6,
+    overflow: "hidden",
+    shadowColor: "#1D4ED8",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+    elevation: 7,
+  },
+  cardGlowOrb1: {
+    position: "absolute",
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: "rgba(59, 130, 246, 0.35)",
+    top: -30,
+    right: -20,
+  },
+  cardGlowOrb2: {
+    position: "absolute",
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: "rgba(30, 58, 138, 0.45)",
+    bottom: -50,
+    left: -40,
+  },
+  cardRingAccent: {
+    position: "absolute",
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    right: -60,
+    top: -60,
+  },
+  cardLoadingRow: {
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    gap: 12,
+    paddingVertical: 12,
   },
-  checkInCenter: {
+  cardLoadingText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#FFFFFF",
+  },
+  checkInRow: {
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    zIndex: 2,
+  },
+  checkInIconTile: {
+    width: 58,
+    height: 58,
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.28)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  checkInTextGroup: {
+    flex: 1,
+    marginLeft: 16,
+    marginRight: 10,
   },
   checkInTitle: {
     fontSize: 22,
     fontWeight: "800",
     color: "#FFFFFF",
-    marginTop: 10,
+    letterSpacing: -0.4,
   },
   checkInSubtitle: {
     fontSize: 13,
     color: "rgba(255, 255, 255, 0.88)",
-    marginTop: 4,
+    marginTop: 3,
     fontWeight: "500",
   },
-  cardRightArrow: {
-    position: "absolute",
-    right: 20,
-    top: "50%",
-    marginTop: -12,
+  cardRightCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.32)",
+    justifyContent: "center",
+    alignItems: "center",
   },
 
   // Check Out Card (Secondary)
   checkOutCard: {
     marginTop: 14,
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: "#3B82F6",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
     paddingVertical: 16,
     paddingHorizontal: 18,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.02,
-    shadowRadius: 4,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
     elevation: 1,
+  },
+  checkOutCardActive: {
+    borderColor: "#93C5FD",
+    backgroundColor: "#F8FAFC",
   },
   checkOutLeft: {
     flexDirection: "row",
     alignItems: "center",
+    flex: 1,
   },
   checkOutIconBox: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
-    backgroundColor: "#EFF6FF",
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: "#F1F5F9",
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  checkOutIconBoxActive: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#BFDBFE",
   },
   checkOutTextGroup: {
     marginLeft: 14,
+    flex: 1,
   },
   checkOutTitle: {
     fontSize: 16,
@@ -1512,61 +1856,111 @@ const styles = StyleSheet.create({
     color: "#64748B",
     marginTop: 2,
   },
+  checkOutArrowBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
 
   // Today's Activity Section
   activitySection: {
     marginTop: 26,
-    marginBottom: 10,
+    marginBottom: 12,
+  },
+  activityHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 14,
   },
   activitySectionTitle: {
     fontSize: 18,
     fontWeight: "800",
     color: "#0F172A",
-    marginBottom: 16,
+    letterSpacing: -0.3,
   },
-  timelineContainer: {
-    paddingLeft: 4,
+  activityLivePill: {
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: "#F1F5F9",
+  },
+  activityLiveText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748B",
+    letterSpacing: 0.3,
+  },
+  timelineCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 18,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    elevation: 2,
   },
   timelineItem: {
     flexDirection: "row",
-    marginBottom: 8,
+    marginBottom: 6,
   },
   timelineIconColumn: {
     alignItems: "center",
     width: 36,
   },
   timelineNode: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1,
   },
   nodeGreen: {
-    backgroundColor: "#10B981",
+    backgroundColor: "#D1FAE5",
+    borderColor: "#A7F3D0",
   },
   nodeBlue: {
-    backgroundColor: "#2563EB",
+    backgroundColor: "#DBEAFE",
+    borderColor: "#BFDBFE",
+  },
+  nodeAmber: {
+    backgroundColor: "#FEF3C7",
+    borderColor: "#FDE68A",
   },
   nodeGray: {
     backgroundColor: "#F1F5F9",
+    borderColor: "#E2E8F0",
   },
   timelineLine: {
     width: 2,
     flex: 1,
-    minHeight: 28,
+    minHeight: 26,
     backgroundColor: "#E2E8F0",
-    marginVertical: 4,
+    marginVertical: 3,
+  },
+  timelineLineDone: {
+    backgroundColor: "#A7F3D0",
   },
   timelineContent: {
     flex: 1,
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
-    paddingLeft: 14,
-    paddingTop: 2,
+    paddingLeft: 12,
+    paddingBottom: 6,
   },
-  timelineTextGroup: {},
+  timelineTextGroup: {
+    flex: 1,
+  },
   timelineActionTitle: {
     fontSize: 15,
     fontWeight: "700",
@@ -1574,22 +1968,44 @@ const styles = StyleSheet.create({
   },
   timelineTimeText: {
     fontSize: 12,
-    color: "#94A3B8",
+    color: "#64748B",
     marginTop: 2,
     fontWeight: "500",
   },
-  timelineLocationGroup: {
+  timelineLocationBadge: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 3,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingVertical: 3,
+    paddingHorizontal: 7,
+    borderRadius: 8,
   },
-  timelineLocationText: {
-    fontSize: 12,
-    color: "#64748B",
-    marginLeft: 4,
-    fontWeight: "500",
+  timelineLocationBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  timelineVerifiedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+    paddingVertical: 3,
+    paddingHorizontal: 7,
+    borderRadius: 8,
+  },
+  timelineVerifiedText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#2563EB",
   },
   timelineDashText: {
-    fontSize: 16,
+    fontSize: 13,
     color: "#94A3B8",
     fontWeight: "600",
   },
@@ -1603,14 +2019,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-around",
     alignItems: "center",
     paddingTop: 8,
-    paddingBottom: Platform.OS === "ios" ? 24 : 14,
+    paddingBottom: Platform.OS === "ios" ? 24 : 12,
   },
   tabItem: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 6,
+    paddingVertical: 4,
     paddingHorizontal: 12,
     minWidth: 64,
+    position: "relative",
   },
   tabLabel: {
     fontSize: 11,
@@ -1621,6 +2038,14 @@ const styles = StyleSheet.create({
   tabLabelActive: {
     color: "#2563EB",
     fontWeight: "700",
+  },
+  tabActiveIndicator: {
+    position: "absolute",
+    bottom: -6,
+    width: 20,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: "#2563EB",
   },
 
   // Modal Styles

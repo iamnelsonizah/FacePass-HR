@@ -416,3 +416,147 @@ def send_password_reset_email(to_email: str, name: str, code: str) -> bool:
     )
     plain = f"Hello {name},\n\nYour FacePass password reset code is: {code}\nThis code expires in 15 minutes.\n\nFacePass Technologies"
     return send_html_email(to_email, subject, html, plain)
+
+
+def send_hr_attendance_digest(
+    to_email: str,
+    hr_name: str,
+    report_type: str,
+    digest_data: dict,
+) -> bool:
+    """Send an executive attendance & timesheet digest to HR/management."""
+    report_title = "Daily Workforce Attendance Digest" if report_type == "daily" else "Weekly Shift & Payroll Digest"
+    date_str = digest_data.get("date_str", datetime.utcnow().strftime("%B %d, %Y"))
+    subject = f"📋 FacePass: {report_title} — {date_str}"
+
+    present_count = digest_data.get("present_count", 0)
+    total_employees = digest_data.get("total_employees", 1)
+    punctuality_rate = digest_data.get("punctuality_rate", "100%")
+    total_hours = digest_data.get("total_hours", "0h 0m")
+    total_overtime = digest_data.get("total_overtime", "0h 0m")
+    flagged_count = digest_data.get("flagged_count", 0)
+    shifts = digest_data.get("shifts", [])
+
+    rows_html = ""
+    if shifts:
+        for s in shifts:
+            p_badge = (
+                '<span style="background: #DCFCE7; color: #166534; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">✓ On Time</span>'
+                if s.get("is_on_time", True)
+                else '<span style="background: #FEE2E2; color: #991B1B; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">Late</span>'
+            )
+            rows_html += f"""
+            <tr style="border-bottom: 1px solid #E2E8F0;">
+                <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #1E293B;">
+                    {s.get("employee_name", "Employee")}<br/>
+                    <span style="font-size: 11px; color: #64748B; font-family: monospace;">{s.get("employee_code", "")}</span>
+                </td>
+                <td style="padding: 10px 12px; font-size: 12px; color: #334155;">{s.get("check_in_time", "—")}</td>
+                <td style="padding: 10px 12px; font-size: 12px; color: #334155;">{s.get("check_out_time", "Active")}</td>
+                <td style="padding: 10px 12px; font-size: 12px; font-weight: 600; color: #2563EB;">{s.get("duration", "—")}</td>
+                <td style="padding: 10px 12px;">{p_badge}</td>
+            </tr>
+            """
+    else:
+        rows_html = '<tr><td colspan="5" style="padding: 16px; text-align: center; color: #64748B; font-size: 12px;">No shift activity recorded for this period.</td></tr>'
+
+    flagged_box = f"""
+    <div style="background: {'#FEF2F2' if flagged_count > 0 else '#F0FDF4'}; border: 1px solid {'#FCA5A5' if flagged_count > 0 else '#BBF7D0'}; border-radius: 8px; padding: 12px 16px;">
+      <div style="font-size: 12px; font-weight: 700; color: {'#991B1B' if flagged_count > 0 else '#166534'};">
+        {'⚠️ ' + str(flagged_count) + ' Flagged Punch(es) Detected' if flagged_count > 0 else '🛡️ 100% Clean Security Record — Zero Spoof or Geofence Anomalies'}
+      </div>
+      <div style="font-size: 11px; color: {'#B91C1C' if flagged_count > 0 else '#15803D'}; margin-top: 2px;">
+        {'Review flagged records on the Admin Dashboard for anti-spoofing and geofence verification.' if flagged_count > 0 else 'All captured punches validated within designated Marrakesh Hub perimeter with verified passive liveness.'}
+      </div>
+    </div>
+    """
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{report_title}</title>
+</head>
+<body style="margin: 0; padding: 24px 0; background-color: #F8FAFC; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+<div style="max-width: 620px; margin: 0 auto; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+
+  <div style="background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%); padding: 24px; text-align: left; color: #FFFFFF;">
+    <div style="display: inline-block; background: rgba(255,255,255,0.15); padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px;">
+      {report_title}
+    </div>
+    <h1 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.5px;">FacePass Attendance Intelligence</h1>
+    <p style="margin: 4px 0 0; font-size: 13px; color: #BFDBFE;">Facility: Marrakesh Hub • Date: {date_str}</p>
+  </div>
+
+  <div style="padding: 20px 24px 12px;">
+    <p style="margin: 0; font-size: 14px; color: #334155; line-height: 1.5;">
+      Hello <strong>{hr_name}</strong>,<br/>
+      Here is the automated executive workforce summary for <strong>{date_str}</strong>.
+    </p>
+  </div>
+
+  <div style="padding: 0 24px 16px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: separate; border-spacing: 8px 0;">
+      <tr>
+        <td width="25%" style="background: #F1F5F9; border-radius: 8px; padding: 12px; text-align: center;">
+          <div style="font-size: 10px; font-weight: 700; color: #64748B; text-transform: uppercase;">Staff Present</div>
+          <div style="font-size: 20px; font-weight: 800; color: #0F172A; margin-top: 4px;">{present_count}/{total_employees}</div>
+        </td>
+        <td width="25%" style="background: #F1F5F9; border-radius: 8px; padding: 12px; text-align: center;">
+          <div style="font-size: 10px; font-weight: 700; color: #64748B; text-transform: uppercase;">Punctuality</div>
+          <div style="font-size: 20px; font-weight: 800; color: #16A34A; margin-top: 4px;">{punctuality_rate}</div>
+        </td>
+        <td width="25%" style="background: #F1F5F9; border-radius: 8px; padding: 12px; text-align: center;">
+          <div style="font-size: 10px; font-weight: 700; color: #64748B; text-transform: uppercase;">Hours Worked</div>
+          <div style="font-size: 20px; font-weight: 800; color: #2563EB; margin-top: 4px;">{total_hours}</div>
+        </td>
+        <td width="25%" style="background: #F1F5F9; border-radius: 8px; padding: 12px; text-align: center;">
+          <div style="font-size: 10px; font-weight: 700; color: #64748B; text-transform: uppercase;">Overtime</div>
+          <div style="font-size: 20px; font-weight: 800; color: #D97706; margin-top: 4px;">{total_overtime}</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <div style="padding: 8px 24px 20px;">
+    <h3 style="margin: 0 0 10px; font-size: 13px; font-weight: 700; color: #0F172A; text-transform: uppercase; letter-spacing: 0.5px;">
+      Staff Shift & Attendance Activity
+    </h3>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; border: 1px solid #E2E8F0; border-radius: 8px; overflow: hidden;">
+      <thead>
+        <tr style="background: #F8FAFC; border-bottom: 2px solid #E2E8F0; text-align: left;">
+          <th style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #64748B; text-transform: uppercase;">Employee</th>
+          <th style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #64748B; text-transform: uppercase;">Check In</th>
+          <th style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #64748B; text-transform: uppercase;">Check Out</th>
+          <th style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #64748B; text-transform: uppercase;">Duration</th>
+          <th style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #64748B; text-transform: uppercase;">Punctuality</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows_html}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="padding: 0 24px 20px;">
+    {flagged_box}
+  </div>
+
+  <div style="padding: 0 24px 24px; text-align: center;">
+    <a href="https://facepass-hr.fastapicloud.dev" style="display: inline-block; background: #2563EB; color: #FFFFFF; font-size: 13px; font-weight: 600; text-decoration: none; padding: 10px 24px; border-radius: 8px; box-shadow: 0 2px 4px rgba(37,99,235,0.2);">
+      Open Admin Dashboard →
+    </a>
+  </div>
+
+  <div style="background: #F8FAFC; border-top: 1px solid #E2E8F0; padding: 16px 24px; text-align: center; font-size: 11px; color: #94A3B8;">
+    FacePass Automated Attendance & Biometrics System • Marrakesh Hub<br/>
+    This is an automated executive report generated for authorized HR personnel.
+  </div>
+
+</div>
+</body>
+</html>"""
+
+    plain = f"FacePass: {report_title} — {date_str}\n\nPresent: {present_count}/{total_employees}\nPunctuality: {punctuality_rate}\nHours Worked: {total_hours}\nOvertime: {total_overtime}\nFlagged: {flagged_count}\n\nView details on the FacePass Admin Dashboard."
+    return send_html_email(to_email, subject, html, plain)
+

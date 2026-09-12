@@ -48,6 +48,7 @@ class AuthResponse(BaseModel):
     employee_code: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    refresh_token: Optional[str] = None
 
 
 class UserProfile(BaseModel):
@@ -143,9 +144,10 @@ async def get_current_user(
     except HTTPException:
         raise
     except Exception as e:
+        logger.warning(f"Token validation failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {str(e)}",
+            detail="Session expired. Please sign in again.",
         )
 
 
@@ -517,6 +519,7 @@ async def login(request: LoginRequest):
 
         return AuthResponse(
             access_token=auth_response.session.access_token,
+            refresh_token=auth_response.session.refresh_token,
             user_id=auth_response.user.id,
             email=auth_response.user.email or resolved_email,
             employee_code=resolved_employee_code,

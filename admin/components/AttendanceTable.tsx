@@ -17,11 +17,14 @@ interface AttendanceLog {
   longitude?: number;
   geofence_distance_meters?: number;
   device_fingerprint?: string;
+  session_match_score?: number | null;
+  matched_check_in_id?: string | null;
   employees?: {
     first_name: string;
     last_name: string;
     email: string;
     employee_code?: string;
+    avatar_url?: string;
   };
   sites?: {
     name: string;
@@ -117,6 +120,9 @@ export default function AttendanceTable({ logs }: AttendanceTableProps) {
                 Time
               </th>
               <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Location & GPS
+              </th>
+              <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Confidence
               </th>
               <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -133,7 +139,7 @@ export default function AttendanceTable({ logs }: AttendanceTableProps) {
           <tbody className="divide-y divide-gray-50">
             {paginated.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-6 py-12 text-center text-gray-400">
+                <td colSpan={8} className="px-6 py-12 text-center text-gray-400">
                   No attendance logs found
                 </td>
               </tr>
@@ -141,11 +147,16 @@ export default function AttendanceTable({ logs }: AttendanceTableProps) {
               paginated.map((log) => (
                 <tr key={log.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-6 py-4">
-                    <span className="font-medium text-gray-900">
+                    <span className="font-medium text-gray-900 block">
                       {log.employees
                         ? `${log.employees.first_name} ${log.employees.last_name}`
                         : log.employee_id.slice(0, 8)}
                     </span>
+                    {log.employees?.employee_code && (
+                      <span className="text-xs text-gray-400 font-mono">
+                        {log.employees.employee_code}
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <span
@@ -158,6 +169,44 @@ export default function AttendanceTable({ logs }: AttendanceTableProps) {
                   </td>
                   <td className="px-6 py-4 text-gray-600 text-sm">
                     {new Date(log.checked_at).toLocaleString()}
+                  </td>
+                  <td className="px-6 py-4 text-sm">
+                    <div className="flex flex-col">
+                      <span className="font-medium text-gray-900">
+                        📍 {log.sites?.name || "Marrakesh Hub"}
+                      </span>
+                      {log.latitude && log.longitude ? (
+                        <div className="flex items-center gap-2 mt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              window.dispatchEvent(
+                                new CustomEvent("focus-map-coord", {
+                                  detail: { lat: log.latitude, lng: log.longitude, id: log.id },
+                                })
+                              );
+                              const mapEl = document.getElementById("geofence-map-section");
+                              if (mapEl) mapEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-200 transition-colors"
+                            title="Highlight on Live Map"
+                          >
+                            🗺️ View on Map
+                          </button>
+                          <a
+                            href={`https://maps.google.com/?q=${log.latitude},${log.longitude}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-gray-500 hover:text-blue-600 hover:underline"
+                            title="Open in Google Maps"
+                          >
+                            {log.latitude.toFixed(4)}, {log.longitude.toFixed(4)} ↗
+                          </a>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">GPS recorded</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-gray-600 text-sm font-mono">
                     {formatConfidence(log.face_match_confidence)}
@@ -228,10 +277,13 @@ export default function AttendanceTable({ logs }: AttendanceTableProps) {
       )}
 
       {/* Audit Dispute Modal */}
-      <AuditDisputeModal
-        record={selectedAuditLog}
-        onClose={() => setSelectedAuditLog(null)}
-      />
+      {selectedAuditLog && (
+        <AuditDisputeModal
+          record={selectedAuditLog}
+          allLogs={logs}
+          onClose={() => setSelectedAuditLog(null)}
+        />
+      )}
     </div>
   );
 }

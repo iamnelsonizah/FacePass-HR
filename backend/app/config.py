@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # App
     debug: bool = True
-    allowed_origins: str = "http://localhost:3000,http://localhost:8081"
+    allowed_origins: str = "*"
 
     # Email / Resend
     resend_api_key: str = ""
@@ -27,6 +27,8 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> list[str]:
+        if self.allowed_origins.strip() == "*":
+            return ["*"]
         return [origin.strip() for origin in self.allowed_origins.split(",")]
 
     class Config:

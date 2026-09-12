@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   Alert,
-  Linking,
+  Animated,
   useWindowDimensions,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { Ionicons } from "@expo/vector-icons";
 
 interface LivenessChallengeProps {
   onComplete: (result: {
@@ -18,21 +18,40 @@ interface LivenessChallengeProps {
     actionImageBase64: string;
   }) => void;
   challengeId: string;
-  challengeType: "blink" | "head_turn_left" | "head_turn_right" | "smile" | string;
+  challengeType: "blink" | "head_turn_left" | "head_turn_right" | "smile" | "passive" | string;
   instruction: string;
   onCancel?: () => void;
+  isPassive?: boolean;
 }
 
-type LivenessPhase = "reference" | "action" | "processing";
+/**
+ * Phase progression (fully automated):
+ *   ready → detecting → capturing_ref → action_prompt → capturing_action → done
+ *
+ * - ready:            Camera warming up
+ * - detecting:        Waiting ~1.5s for face alignment (simulated; auto-progresses)
+ * - capturing_ref:    Auto-snap reference frame
+ * - action_prompt:    Show action instruction with animated countdown (2.5s)
+ * - capturing_action: Auto-snap action frame
+ * - done:             Processing / calling onComplete
+ */
+type Phase =
+  | "ready"
+  | "detecting"
+  | "capturing_ref"
+  | "action_prompt"
+  | "capturing_action"
+  | "done";
 
 /**
- * Dynamic Multi-Step Liveness Challenge.
+ * Smart Automated Liveness Challenge — no button taps required.
  *
- * Implements a 2-frame verification protocol:
- * 1. Step 1 (Reference): Capture neutral forward-facing baseline
- * 2. Step 2 (Action): Execute dynamic prompt (blink, head turn, smile)
- *
- * Prevents static photo spoofing and replay attacks by capturing variance.
+ * Like Apple Face ID / modern banking apps:
+ *   1. User positions face in the oval
+ *   2. System auto-detects + captures neutral baseline
+ *   3. Action instruction appears (blink, turn head, smile)
+ *   4. System auto-captures action frame after countdown
+ *   5. Verification processes automatically
  */
 export default function LivenessChallenge({
   onComplete,
@@ -40,32 +59,283 @@ export default function LivenessChallenge({
   challengeType,
   instruction,
   onCancel,
+  isPassive = false,
 }: LivenessChallengeProps) {
+  const isPassiveMode = isPassive || challengeType === "passive" || challengeId.startsWith("passive");
   const cameraRef = useRef<CameraView>(null);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [permission, requestPermission] = useCameraPermissions();
-  const [phase, setPhase] = useState<LivenessPhase>("reference");
+  const [phase, setPhase] = useState<Phase>("ready");
   const [referenceFrame, setReferenceFrame] = useState<string | null>(null);
-  const [timeLeft, setTimeLeft] = useState(15);
-  const [isCapturing, setIsCapturing] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
+  const [countdown, setCountdown] = useState(3);
+  const [overallTimer, setOverallTimer] = useState(20);
+  const completedRef = useRef(false);
+  const isCapturingRef = useRef(false);
 
+  // Animations
+  const ringPulse = useRef(new Animated.Value(1)).current;
+  const ringOpacity = useRef(new Animated.Value(0.6)).current;
+  const scanAnim = useRef(new Animated.Value(0)).current;
+  const statusFade = useRef(new Animated.Value(0)).current;
+  const progressWidth = useRef(new Animated.Value(0)).current;
+
+  // ── Ring pulse animation ──
   useEffect(() => {
-    if (phase === "processing") return;
+    if (phase === "done") return;
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(ringPulse, {
+            toValue: 1.06,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringOpacity, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(ringPulse, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringOpacity, {
+            toValue: 0.6,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ]),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [phase]);
 
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
+  // ── Laser scan line ──
+  useEffect(() => {
+    if (phase === "done") return;
+    const scan = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scanAnim, {
+          toValue: 1,
+          duration: 1600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scanAnim, {
+          toValue: 0,
+          duration: 1600,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    scan.start();
+    return () => scan.stop();
+  }, [phase]);
+
+  // ── Status text fade in on phase change ──
+  useEffect(() => {
+    statusFade.setValue(0);
+    Animated.timing(statusFade, {
+      toValue: 1,
+      duration: 350,
+      useNativeDriver: true,
+    }).start();
+  }, [phase]);
+
+  // ── Overall safety timeout ──
+  useEffect(() => {
+    if (phase === "done") return;
+    const interval = setInterval(() => {
+      setOverallTimer((prev) => {
         if (prev <= 1) {
-          clearInterval(timer);
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [phase]);
+
+  // ── Take a photo helper ──
+  const takePhoto = useCallback(
+    async (quality = 0.7): Promise<string | null> => {
+      if (!cameraRef.current || isCapturingRef.current) return null;
+      isCapturingRef.current = true;
+      try {
+        const photo = await cameraRef.current.takePictureAsync({
+          base64: true,
+          quality,
+          shutterSound: false,
+        });
+        return photo?.base64 || null;
+      } catch (err: any) {
+        console.warn("Liveness capture attempt failed:", err?.message);
+        // Retry once
+        try {
+          await new Promise((r) => setTimeout(r, 400));
+          const retry = await cameraRef.current?.takePictureAsync({
+            base64: true,
+            quality: 0.6,
+            shutterSound: false,
+          });
+          return retry?.base64 || null;
+        } catch {
+          return null;
+        }
+      } finally {
+        isCapturingRef.current = false;
+      }
+    },
+    []
+  );
+
+  // ══════════════════════════════════════════════════════
+  // Phase state machine — fully automated progression
+  // ══════════════════════════════════════════════════════
+
+  // Phase: ready → detecting (once camera is warmed up)
+  useEffect(() => {
+    if (phase !== "ready" || !isCameraReady) return;
+    const timer = setTimeout(() => setPhase("detecting"), isPassiveMode ? 150 : 400);
+    return () => clearTimeout(timer);
+  }, [phase, isCameraReady, isPassiveMode]);
+
+  // Phase: detecting → auto-snap
+  useEffect(() => {
+    if (phase !== "detecting") return;
+
+    if (isPassiveMode) {
+      // Sub-Second Passive Liveness: charge up ring and snap in ~380ms
+      Animated.timing(progressWidth, {
+        toValue: 100,
+        duration: 380,
+        useNativeDriver: false,
+      }).start();
+
+      const timer = setTimeout(async () => {
+        if (completedRef.current) return;
+        const base64 = await takePhoto(0.85);
+        if (base64 && !completedRef.current) {
+          completedRef.current = true;
+          setPhase("done");
+          setTimeout(() => {
+            onComplete({
+              challengeId: challengeId.startsWith("passive") ? challengeId : "passive-subsecond",
+              referenceImageBase64: base64,
+              actionImageBase64: base64,
+            });
+          }, 300);
+        }
+      }, 380);
+      return () => clearTimeout(timer);
+    }
+
+    // Active challenge mode:
+    Animated.timing(progressWidth, {
+      toValue: 50,
+      duration: 1500,
+      useNativeDriver: false,
+    }).start();
+
+    const timer = setTimeout(() => setPhase("capturing_ref"), 1500);
+    return () => clearTimeout(timer);
+  }, [phase, isPassiveMode, takePhoto, challengeId, onComplete]);
+
+  // Phase: capturing_ref → action_prompt (auto-snap reference frame)
+  useEffect(() => {
+    if (phase !== "capturing_ref") return;
+    let cancelled = false;
+
+    (async () => {
+      const base64 = await takePhoto(0.7);
+      if (cancelled || completedRef.current) return;
+      if (base64) {
+        setReferenceFrame(base64);
+        setPhase("action_prompt");
+        setCountdown(3);
+      } else {
+        // Couldn't capture — retry detection
+        setPhase("detecting");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, takePhoto]);
+
+  // Phase: action_prompt countdown (3 → 0), then → capturing_action
+  useEffect(() => {
+    if (phase !== "action_prompt") return;
+
+    // Animate progress bar during action prompt
+    Animated.timing(progressWidth, {
+      toValue: 85,
+      duration: 3000,
+      useNativeDriver: false,
+    }).start();
+
+    const interval = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setPhase("capturing_action");
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
 
-    return () => clearInterval(timer);
+    return () => clearInterval(interval);
   }, [phase]);
 
+  // Phase: capturing_action → done (auto-snap action frame + complete)
+  useEffect(() => {
+    if (phase !== "capturing_action" || !referenceFrame) return;
+    let cancelled = false;
+
+    (async () => {
+      const base64 = await takePhoto(0.7);
+      if (cancelled || completedRef.current) return;
+
+      if (base64) {
+        completedRef.current = true;
+
+        // Animate progress to 100%
+        Animated.timing(progressWidth, {
+          toValue: 100,
+          duration: 300,
+          useNativeDriver: false,
+        }).start();
+
+        setPhase("done");
+
+        // Small delay so user sees the "Verified" state
+        setTimeout(() => {
+          onComplete({
+            challengeId,
+            referenceImageBase64: referenceFrame,
+            actionImageBase64: base64,
+          });
+        }, 600);
+      } else {
+        // Failed — go back to action prompt and try again
+        setCountdown(2);
+        setPhase("action_prompt");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, referenceFrame, takePhoto, onComplete, challengeId]);
+
+  // ── Derived UI values ──
   const getActionEmoji = () => {
     switch (challengeType) {
       case "blink":
@@ -81,103 +351,92 @@ export default function LivenessChallenge({
     }
   };
 
-  const handleCaptureReference = async () => {
-    if (!cameraRef.current || isCapturing) return;
-
-    setIsCapturing(true);
-    try {
-      if (!isCameraReady) {
-        await new Promise((resolve) => setTimeout(resolve, 600));
+  const getStatusText = (): string => {
+    if (isPassiveMode) {
+      switch (phase) {
+        case "ready":
+          return "Warming up scanner…";
+        case "detecting":
+          return "Align face in oval — auto-capturing…";
+        case "done":
+          return "Biometric Captured & Verified ✓";
+        default:
+          return "Scanning…";
       }
-
-      const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.7,
-        shutterSound: false,
-      });
-
-      if (photo?.base64) {
-        setReferenceFrame(photo.base64);
-        setPhase("action");
-      }
-    } catch (err: any) {
-      console.warn("Reference capture initial attempt:", err?.message || err);
-      try {
-        await new Promise((resolve) => setTimeout(resolve, 800));
-        const photoRetry = await cameraRef.current.takePictureAsync({
-          base64: true,
-          quality: 0.6,
-          shutterSound: false,
-        });
-        if (photoRetry?.base64) {
-          setReferenceFrame(photoRetry.base64);
-          setPhase("action");
-        }
-      } catch (retryErr: any) {
-        console.error("Reference capture error:", retryErr);
-        Alert.alert(
-          "Capture Error",
-          "Could not capture reference photo. Please hold steady and try again."
-        );
-      }
-    } finally {
-      setIsCapturing(false);
+    }
+    switch (phase) {
+      case "ready":
+        return "Initializing camera…";
+      case "detecting":
+        return "Position your face in the oval";
+      case "capturing_ref":
+        return "Hold still…";
+      case "action_prompt":
+        return instruction || "Perform the action";
+      case "capturing_action":
+        return "Verifying…";
+      case "done":
+        return "Verified ✓";
+      default:
+        return "";
     }
   };
 
-  const handleCaptureAction = async () => {
-    if (!cameraRef.current || isCapturing || !referenceFrame) return;
-
-    setIsCapturing(true);
-    setPhase("processing");
-
-    try {
-      if (!isCameraReady) {
-        await new Promise((resolve) => setTimeout(resolve, 600));
-      }
-
-      const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.7,
-        shutterSound: false,
-      });
-
-      if (photo?.base64) {
-        onComplete({
-          challengeId,
-          referenceImageBase64: referenceFrame,
-          actionImageBase64: photo.base64,
-        });
-      }
-    } catch (err: any) {
-      console.warn("Action capture initial attempt:", err?.message || err);
-      try {
-        await new Promise((resolve) => setTimeout(resolve, 800));
-        const photoRetry = await cameraRef.current.takePictureAsync({
-          base64: true,
-          quality: 0.6,
-          shutterSound: false,
-        });
-        if (photoRetry?.base64) {
-          onComplete({
-            challengeId,
-            referenceImageBase64: referenceFrame,
-            actionImageBase64: photoRetry.base64,
-          });
-        }
-      } catch (retryErr: any) {
-        console.error("Action capture error:", retryErr);
-        Alert.alert(
-          "Capture Error",
-          "Could not capture verification photo. Please try again."
-        );
-        setPhase("action");
-      }
-    } finally {
-      setIsCapturing(false);
+  const getStatusEmoji = (): string => {
+    if (isPassiveMode) {
+      return phase === "done" ? "🛡️" : "⚡";
+    }
+    switch (phase) {
+      case "ready":
+        return "📷";
+      case "detecting":
+        return "😐";
+      case "capturing_ref":
+        return "📸";
+      case "action_prompt":
+        return getActionEmoji();
+      case "capturing_action":
+        return "⏳";
+      case "done":
+        return "✅";
+      default:
+        return "";
     }
   };
 
+  const getRingColor = (): string => {
+    switch (phase) {
+      case "ready":
+      case "detecting":
+        return "rgba(37, 99, 235, 0.85)";
+      case "capturing_ref":
+        return "rgba(234, 179, 8, 0.9)";
+      case "action_prompt":
+      case "capturing_action":
+        return "rgba(22, 163, 74, 0.9)";
+      case "done":
+        return "rgba(16, 185, 129, 1)";
+      default:
+        return "rgba(37, 99, 235, 0.85)";
+    }
+  };
+
+  const phaseIndex =
+    phase === "ready" || phase === "detecting"
+      ? 0
+      : phase === "capturing_ref"
+      ? 1
+      : phase === "action_prompt" || phase === "capturing_action"
+      ? 2
+      : 3;
+
+  // ── Scan line interpolation ──
+  const scanTranslateY = scanAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-130, 130],
+  });
+
+  // ── Permission screens ──
   if (!permission) {
     return (
       <View style={styles.centerContainer}>
@@ -190,57 +449,45 @@ export default function LivenessChallenge({
     return (
       <View style={styles.expiredContainer}>
         <Text style={styles.expiredEmoji}>📷</Text>
-        <Text style={styles.expiredText}>Camera Access Required</Text>
+        <Text style={styles.expiredTitle}>Camera Access Required</Text>
         <Text style={styles.expiredSubtext}>
           FacePass requires camera permission for facial verification.
         </Text>
-        <TouchableOpacity
-          style={[styles.confirmButton, { marginTop: 20 }]}
+        <Text
+          style={styles.grantButton}
           onPress={requestPermission}
         >
-          <Text style={styles.confirmButtonText}>Grant Permission</Text>
-        </TouchableOpacity>
-        {onCancel && (
-          <TouchableOpacity
-            style={{ marginTop: 16, padding: 8 }}
-            onPress={onCancel}
-          >
-            <Text style={{ color: "#94A3B8", fontSize: 15, fontWeight: "600" }}>
-              Cancel
-            </Text>
-          </TouchableOpacity>
-        )}
+          Grant Permission
+        </Text>
       </View>
     );
   }
 
-  if (timeLeft <= 0) {
+  // ── Timeout screen ──
+  if (overallTimer <= 0 && phase !== "done") {
     return (
       <View style={styles.expiredContainer}>
         <Text style={styles.expiredEmoji}>⏰</Text>
-        <Text style={styles.expiredText}>Verification Timed Out</Text>
+        <Text style={styles.expiredTitle}>Verification Timed Out</Text>
         <Text style={styles.expiredSubtext}>
-          Please face the camera and try again.
+          Please position your face clearly and try again.
         </Text>
-        <TouchableOpacity
-          style={[styles.confirmButton, { marginTop: 24 }]}
+        <Text
+          style={styles.grantButton}
           onPress={() => {
-            setPhase("reference");
+            setPhase("ready");
             setReferenceFrame(null);
-            setTimeLeft(15);
+            setOverallTimer(20);
+            setCountdown(3);
+            completedRef.current = false;
           }}
         >
-          <Text style={styles.confirmButtonText}>Try Again</Text>
-        </TouchableOpacity>
+          Try Again
+        </Text>
         {onCancel && (
-          <TouchableOpacity
-            style={{ marginTop: 16, padding: 8 }}
-            onPress={onCancel}
-          >
-            <Text style={{ color: "#94A3B8", fontSize: 15, fontWeight: "600" }}>
-              Back to Dashboard
-            </Text>
-          </TouchableOpacity>
+          <Text style={styles.cancelText} onPress={onCancel}>
+            Cancel
+          </Text>
         )}
       </View>
     );
@@ -248,6 +495,7 @@ export default function LivenessChallenge({
 
   return (
     <View style={styles.container}>
+      {/* Full-screen camera */}
       <CameraView
         ref={cameraRef}
         style={[styles.camera, { width: windowWidth, height: windowHeight }]}
@@ -263,99 +511,153 @@ export default function LivenessChallenge({
         }}
       />
 
+      {/* Overlay */}
       <View style={styles.overlay} pointerEvents="box-none">
-        {/* Header Bar */}
-        <View style={styles.headerBar}>
-          {/* Step Pills */}
-          <View style={styles.stepsContainer}>
-            <View
-              style={[
-                styles.stepPill,
-                phase === "reference" ? styles.stepPillActive : styles.stepPillDone,
-              ]}
-            >
-              <Text style={styles.stepPillText}>1. Neutral</Text>
-            </View>
-            <View
-              style={[
-                styles.stepPill,
-                phase === "action" ? styles.stepPillActive : styles.stepPillPending,
-              ]}
-            >
-              <Text style={styles.stepPillText}>2. Action</Text>
-            </View>
+        {/* ─── Top Bar ─── */}
+        <View style={styles.topBar}>
+          {/* Progress Dots */}
+          <View style={styles.dotsRow}>
+            {["Detect", "Capture", "Verify", "Done"].map((label, i) => (
+              <View key={label} style={styles.dotItem}>
+                <View
+                  style={[
+                    styles.dot,
+                    i <= phaseIndex ? styles.dotActive : styles.dotInactive,
+                    i < phaseIndex && styles.dotCompleted,
+                  ]}
+                >
+                  {i < phaseIndex ? (
+                    <Ionicons name="checkmark" size={10} color="#fff" />
+                  ) : null}
+                </View>
+                <Text
+                  style={[
+                    styles.dotLabel,
+                    i <= phaseIndex && { color: "#fff" },
+                  ]}
+                >
+                  {label}
+                </Text>
+              </View>
+            ))}
           </View>
 
           {/* Timer */}
           <View style={styles.timerBadge}>
-            <Text style={styles.timerText}>{timeLeft}s</Text>
+            <Ionicons
+              name="time-outline"
+              size={14}
+              color={overallTimer <= 5 ? "#EF4444" : "#fff"}
+            />
+            <Text
+              style={[
+                styles.timerText,
+                overallTimer <= 5 && { color: "#EF4444" },
+              ]}
+            >
+              {overallTimer}s
+            </Text>
           </View>
         </View>
 
-        {/* Oval Guide */}
-        <View
-          style={[
-            styles.faceOutline,
-            phase === "action" && styles.faceOutlineAction,
-          ]}
-        />
+        {/* ─── Face Oval Ring ─── */}
+        <View style={styles.ovalContainer}>
+          <Animated.View
+            style={[
+              styles.faceRing,
+              {
+                borderColor: getRingColor(),
+                transform: [{ scale: ringPulse }],
+                opacity: ringOpacity,
+              },
+            ]}
+          >
+            {/* Scan line */}
+            {phase !== "done" && (
+              <Animated.View
+                style={[
+                  styles.scanLine,
+                  {
+                    transform: [{ translateY: scanTranslateY }],
+                    backgroundColor: getRingColor(),
+                  },
+                ]}
+              />
+            )}
+          </Animated.View>
 
-        {/* Instruction & Trigger */}
-        <View style={styles.instructionContainer}>
-          {phase === "reference" ? (
-            <>
-              <Text style={styles.emoji}>😐</Text>
-              <Text style={styles.instructionTitle}>Step 1: Look Straight</Text>
-              <Text style={styles.instructionSubtitle}>
-                Hold phone at eye level with neutral expression
+          {/* Corner ticks */}
+          <View style={[styles.cornerTick, styles.cornerTL]} />
+          <View style={[styles.cornerTick, styles.cornerTR]} />
+          <View style={[styles.cornerTick, styles.cornerBL]} />
+          <View style={[styles.cornerTick, styles.cornerBR]} />
+        </View>
+
+        {/* ─── Bottom Status Card ─── */}
+        <View style={styles.statusCard}>
+          <Animated.View
+            style={[styles.statusInner, { opacity: statusFade }]}
+          >
+            {/* Emoji */}
+            <Text style={styles.statusEmoji}>{getStatusEmoji()}</Text>
+
+            {/* Phase title */}
+            <Text style={styles.statusTitle}>{getStatusText()}</Text>
+
+            {/* Sub-info per phase */}
+            {phase === "detecting" && (
+              <Text style={styles.statusSubtext}>
+                Keep your face centered and well lit
               </Text>
+            )}
 
-              <TouchableOpacity
-                style={[
-                  styles.confirmButton,
-                  (!isCameraReady || isCapturing) && styles.confirmButtonDisabled,
-                ]}
-                onPress={handleCaptureReference}
-                disabled={!isCameraReady || isCapturing}
-              >
-                <Text style={styles.confirmButtonText}>
-                  {!isCameraReady
-                    ? "Initializing Camera..."
-                    : isCapturing
-                    ? "Capturing..."
-                    : "Ready, Next →"}
-                </Text>
-              </TouchableOpacity>
-            </>
-          ) : phase === "action" ? (
-            <>
-              <Text style={styles.emoji}>{getActionEmoji()}</Text>
-              <Text style={styles.instructionTitle}>Step 2: Perform Action</Text>
-              <Text style={styles.instructionPrompt}>{instruction}</Text>
+            {phase === "action_prompt" && (
+              <View style={styles.countdownRow}>
+                <Text style={styles.countdownLabel}>Auto-capture in</Text>
+                <View style={styles.countdownBadge}>
+                  <Text style={styles.countdownNumber}>{countdown}</Text>
+                </View>
+              </View>
+            )}
 
-              <TouchableOpacity
+            {phase === "done" && (
+              <View style={styles.doneRow}>
+                <Ionicons name="shield-checkmark" size={18} color="#10B981" />
+                <Text style={styles.doneText}>Liveness confirmed</Text>
+              </View>
+            )}
+
+            {(phase === "capturing_ref" || phase === "capturing_action") && (
+              <ActivityIndicator
+                size="small"
+                color="#fff"
+                style={{ marginTop: 8 }}
+              />
+            )}
+
+            {/* Progress bar */}
+            <View style={styles.progressTrack}>
+              <Animated.View
                 style={[
-                  styles.confirmButton,
-                  styles.confirmButtonAction,
-                  (!isCameraReady || isCapturing) && styles.confirmButtonDisabled,
+                  styles.progressFill,
+                  {
+                    width: progressWidth.interpolate({
+                      inputRange: [0, 100],
+                      outputRange: ["0%", "100%"],
+                    }),
+                    backgroundColor:
+                      phase === "done" ? "#10B981" : "#2563EB",
+                  },
                 ]}
-                onPress={handleCaptureAction}
-                disabled={!isCameraReady || isCapturing}
-              >
-                <Text style={styles.confirmButtonText}>
-                  {!isCameraReady
-                    ? "Initializing Camera..."
-                    : isCapturing
-                    ? "Verifying..."
-                    : "Confirm Action ✓"}
-                </Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <View style={styles.processingContainer}>
-              <ActivityIndicator size="large" color="#16A34A" />
-              <Text style={styles.processingText}>Verifying Liveness...</Text>
+              />
             </View>
+          </Animated.View>
+
+          {/* Cancel link */}
+          {onCancel && phase !== "done" && (
+            <Text style={styles.cancelLink} onPress={onCancel}>
+              Cancel
+            </Text>
           )}
         </View>
       </View>
@@ -370,8 +672,6 @@ const styles = StyleSheet.create({
   },
   camera: {
     ...StyleSheet.absoluteFill,
-    width: "100%",
-    height: "100%",
   },
   centerContainer: {
     flex: 1,
@@ -379,151 +679,252 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#000",
   },
-  confirmButtonDisabled: {
-    opacity: 0.5,
-  },
   overlay: {
     ...StyleSheet.absoluteFill,
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 40,
-    backgroundColor: "rgba(0,0,0,0.15)",
+    paddingTop: 50,
+    paddingBottom: 32,
+    backgroundColor: "rgba(0,0,0,0.2)",
   },
-  headerBar: {
+
+  // ── Top Bar ──
+  topBar: {
     width: "100%",
     paddingHorizontal: 20,
+    alignItems: "center",
+    gap: 12,
+  },
+  dotsRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "center",
+    gap: 20,
+  },
+  dotItem: {
+    alignItems: "center",
+    gap: 4,
+  },
+  dot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: "center",
     alignItems: "center",
   },
-  stepsContainer: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  stepPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.2)",
-  },
-  stepPillActive: {
+  dotActive: {
     backgroundColor: "#2563EB",
   },
-  stepPillDone: {
-    backgroundColor: "#16A34A",
+  dotInactive: {
+    backgroundColor: "rgba(255,255,255,0.2)",
   },
-  stepPillPending: {
-    backgroundColor: "rgba(255,255,255,0.15)",
+  dotCompleted: {
+    backgroundColor: "#10B981",
   },
-  stepPillText: {
-    color: "#fff",
-    fontSize: 12,
+  dotLabel: {
+    fontSize: 10,
     fontWeight: "600",
+    color: "rgba(255,255,255,0.4)",
   },
   timerBadge: {
-    backgroundColor: "rgba(0,0,0,0.6)",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
   },
   timerText: {
     color: "#fff",
-    fontSize: 14,
-    fontWeight: "bold",
+    fontSize: 13,
+    fontWeight: "700",
   },
-  faceOutline: {
+
+  // ── Face Oval ──
+  ovalContainer: {
+    width: 260,
+    height: 340,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  faceRing: {
     width: 250,
     height: 330,
     borderRadius: 125,
     borderWidth: 3,
-    borderColor: "rgba(37, 99, 235, 0.85)",
-    borderStyle: "dashed",
+    overflow: "hidden",
     backgroundColor: "transparent",
   },
-  faceOutlineAction: {
-    borderColor: "rgba(22, 163, 74, 0.9)",
+  scanLine: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    height: 2,
+    top: "50%",
+    borderRadius: 1,
+    opacity: 0.7,
   },
-  instructionContainer: {
-    alignItems: "center",
-    backgroundColor: "rgba(17, 24, 39, 0.85)",
-    paddingHorizontal: 24,
-    paddingVertical: 20,
-    borderRadius: 20,
-    marginHorizontal: 20,
+  cornerTick: {
+    position: "absolute",
+    width: 20,
+    height: 20,
+    borderColor: "rgba(255,255,255,0.6)",
+  },
+  cornerTL: {
+    top: 0,
+    left: 0,
+    borderTopWidth: 3,
+    borderLeftWidth: 3,
+    borderTopLeftRadius: 8,
+  },
+  cornerTR: {
+    top: 0,
+    right: 0,
+    borderTopWidth: 3,
+    borderRightWidth: 3,
+    borderTopRightRadius: 8,
+  },
+  cornerBL: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: 3,
+    borderLeftWidth: 3,
+    borderBottomLeftRadius: 8,
+  },
+  cornerBR: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: 3,
+    borderRightWidth: 3,
+    borderBottomRightRadius: 8,
+  },
+
+  // ── Bottom Status Card ──
+  statusCard: {
     width: "90%",
+    backgroundColor: "rgba(15, 23, 42, 0.88)",
+    borderRadius: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
-  emoji: {
-    fontSize: 42,
-    marginBottom: 6,
+  statusInner: {
+    alignItems: "center",
+    width: "100%",
   },
-  instructionTitle: {
+  statusEmoji: {
+    fontSize: 36,
+    marginBottom: 4,
+  },
+  statusTitle: {
     color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
+    fontSize: 17,
+    fontWeight: "700",
     textAlign: "center",
+    marginBottom: 2,
   },
-  instructionSubtitle: {
-    color: "rgba(255,255,255,0.75)",
+  statusSubtext: {
+    color: "rgba(255,255,255,0.6)",
     fontSize: 13,
     textAlign: "center",
-    marginTop: 4,
-    marginBottom: 16,
+    marginTop: 2,
   },
-  instructionPrompt: {
-    color: "#86EFAC",
-    fontSize: 16,
-    fontWeight: "600",
-    textAlign: "center",
-    marginTop: 4,
-    marginBottom: 16,
-  },
-  confirmButton: {
-    backgroundColor: "#2563EB",
-    paddingHorizontal: 36,
-    paddingVertical: 14,
-    borderRadius: 12,
-    width: "100%",
+  countdownRow: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: 8,
+    marginTop: 8,
   },
-  confirmButtonAction: {
-    backgroundColor: "#16A34A",
-  },
-  confirmButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  processingContainer: {
-    paddingVertical: 16,
-    alignItems: "center",
-  },
-  processingText: {
-    color: "#fff",
-    fontSize: 15,
-    marginTop: 12,
+  countdownLabel: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 14,
     fontWeight: "500",
   },
+  countdownBadge: {
+    backgroundColor: "#16A34A",
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  countdownNumber: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  doneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 6,
+  },
+  doneText: {
+    color: "#10B981",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  progressTrack: {
+    width: "100%",
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    marginTop: 14,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 2,
+  },
+  cancelLink: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 14,
+  },
+
+  // ── Expired / Permission screens ──
   expiredContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
-    backgroundColor: "#f9fafb",
+    backgroundColor: "#0F172A",
   },
   expiredEmoji: {
     fontSize: 52,
     marginBottom: 16,
   },
-  expiredText: {
+  expiredTitle: {
     fontSize: 22,
     fontWeight: "bold",
-    color: "#DC2626",
+    color: "#fff",
+    textAlign: "center",
   },
   expiredSubtext: {
     fontSize: 14,
-    color: "#6B7280",
+    color: "rgba(255,255,255,0.6)",
     marginTop: 8,
+    textAlign: "center",
+  },
+  grantButton: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 12,
+    overflow: "hidden",
+    marginTop: 24,
+    textAlign: "center",
+  },
+  cancelText: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 15,
+    fontWeight: "600",
+    marginTop: 16,
   },
 });

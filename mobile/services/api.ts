@@ -3,17 +3,20 @@ import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../lib/supabase";
 import { getDeviceFingerprint } from "./device";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "https://facepass-hr.fastapicloud.dev";
 
 /**
  * Ensure image is delivered as a local file URI (file://...) so React Native
  * Android networking streams the multipart form-data payload natively without corruption.
  */
 async function resolveFileUri(imageInput: string, prefix = "punch"): Promise<string> {
-  if (imageInput.startsWith("file://")) {
+  if (imageInput.startsWith("file://") || imageInput.startsWith("content://")) {
     return imageInput;
   }
-  if (imageInput.startsWith("/")) {
+  // A bare "/" prefix could be a real file path OR raw JPEG base64 (which
+  // always starts with "/9j/" due to the SOI marker).  Real file paths are
+  // short; base64 payloads are hundreds of KB.
+  if (imageInput.startsWith("/") && imageInput.length < 1000 && !imageInput.startsWith("/9j/")) {
     return `file://${imageInput}`;
   }
   // Write base64 string to a cache file
@@ -48,6 +51,85 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// Auto-clean expired/revoked sessions on 401
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error?.response?.status === 401) {
+      console.log("Session expired (401), cleared local session cache.");
+      try {
+        await supabase.auth.signOut();
+      } catch (_) {}
+    }
+    return Promise.reject(error);
+  }
+);
+
+/**
+ * Post multipart/form-data payload using XMLHttpRequest.
+ * React Native's Android core handles { uri, type, name } natively via XMLHttpRequest,
+ * ensuring proper multipart boundaries and file streaming.
+ */
+async function postFormData<T = any>(endpoint: string, formData: FormData): Promise<T> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const url = `${API_URL}${endpoint}`;
+
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.timeout = 45000;
+
+    xhr.setRequestHeader("Accept", "application/json");
+    if (session?.access_token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${session.access_token}`);
+    }
+
+    xhr.onload = () => {
+      let data: any;
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        data = { detail: xhr.responseText };
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data as T);
+      } else {
+        let detailMsg = data?.detail || data?.message;
+        if (Array.isArray(detailMsg)) {
+          detailMsg = detailMsg.map((item: any) => item.msg || JSON.stringify(item)).join("\n");
+        } else if (typeof detailMsg === "object" && detailMsg !== null) {
+          detailMsg = JSON.stringify(detailMsg);
+        }
+        const message = detailMsg || `Biometric request failed with status ${xhr.status}`;
+        const error: any = new Error(message);
+        error.response = { status: xhr.status, data };
+        reject(error);
+      }
+    };
+
+    xhr.onerror = (e) => {
+      console.error("XHR error:", e);
+      const error: any = new Error(
+        "Network connection failed. Unable to reach FacePass biometrics server. Please verify your internet connection."
+      );
+      error.isNetworkError = true;
+      reject(error);
+    };
+
+    xhr.ontimeout = () => {
+      const error: any = new Error("Biometric request timed out. Please try again.");
+      error.isTimeout = true;
+      reject(error);
+    };
+
+    xhr.send(formData);
+  });
+}
+
 // ---------- API Methods ----------
 
 /**
@@ -59,7 +141,8 @@ export async function checkIn(
   longitude: number,
   challengeId?: string,
   deviceFingerprint?: string,
-  clientUuid?: string
+  clientUuid?: string,
+  offlineTimestamp?: string
 ) {
   const fileUri = await resolveFileUri(imageBase64, "checkin");
   const formData = new FormData();
@@ -78,11 +161,9 @@ export async function checkIn(
   formData.append("device_fingerprint", fp);
 
   if (clientUuid) formData.append("client_uuid", clientUuid);
+  if (offlineTimestamp) formData.append("offline_timestamp", offlineTimestamp);
 
-  const response = await api.post("/api/attendance/check-in", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-  return response.data;
+  return await postFormData("/api/attendance/check-in", formData);
 }
 
 /**
@@ -93,7 +174,9 @@ export async function checkOut(
   latitude: number,
   longitude: number,
   challengeId?: string,
-  clientUuid?: string
+  clientUuid?: string,
+  deviceFingerprint?: string,
+  offlineTimestamp?: string
 ) {
   const fileUri = await resolveFileUri(imageBase64, "checkout");
   const formData = new FormData();
@@ -108,15 +191,13 @@ export async function checkOut(
 
   if (challengeId) formData.append("challenge_id", challengeId);
 
-  const fp = await getDeviceFingerprint();
+  const fp = deviceFingerprint || (await getDeviceFingerprint());
   formData.append("device_fingerprint", fp);
 
   if (clientUuid) formData.append("client_uuid", clientUuid);
+  if (offlineTimestamp) formData.append("offline_timestamp", offlineTimestamp);
 
-  const response = await api.post("/api/attendance/check-out", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-  return response.data;
+  return await postFormData("/api/attendance/check-out", formData);
 }
 
 /**
@@ -135,10 +216,7 @@ export async function enroll(images: string[], employeeId: string) {
     } as any);
   }
 
-  const response = await api.post("/api/employees/enroll", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-  return response.data;
+  return await postFormData("/api/employees/enroll", formData);
 }
 
 /**
@@ -182,10 +260,7 @@ export async function uploadAvatar(imageUri: string) {
     name: "avatar.jpg",
   } as any);
 
-  const response = await api.post("/api/auth/avatar", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-  return response.data;
+  return await postFormData("/api/auth/avatar", formData);
 }
 
 /**
@@ -224,10 +299,28 @@ export async function kioskPunch(
   const fp = deviceFingerprint || (await getDeviceFingerprint());
   formData.append("device_fingerprint", fp);
 
-  const response = await api.post("/api/attendance/kiosk-punch", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-  return response.data;
+  return await postFormData("/api/attendance/kiosk-punch", formData);
+}
+
+/**
+ * Fetch active sites for dynamic geofence verification.
+ */
+export async function getActiveSites(): Promise<
+  {
+    id: string;
+    name: string;
+    address?: string;
+    latitude: number;
+    longitude: number;
+    radius_meters: number;
+  }[]
+> {
+  try {
+    const response = await api.get("/api/attendance/sites");
+    return response.data?.sites || [];
+  } catch {
+    return [];
+  }
 }
 
 export default api;
